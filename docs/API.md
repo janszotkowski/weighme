@@ -64,7 +64,7 @@ Every address may make **300 requests a minute** to `/v1/*` (`/v1/health` does n
 | `RateLimit-Reset`     | Seconds until the window starts again    |
 | `Retry-After`         | On `429` and `503` only: seconds to wait |
 
-Past the limit the API answers `429 RATE_LIMITED`. Wait for `Retry-After` seconds, then continue. A self-hosted API sets these numbers itself, see the [README](../README.md).
+Past the limit the API answers `429 RATE_LIMITED`. Wait for `Retry-After` seconds, then continue. Adding packages to the queue has a much smaller limit of its own: `GET /v1/analyses` counts against it only when the package was not known and is now queued, and answers `429` past it too. A self-hosted API sets these numbers itself, see the [README](../README.md).
 
 Answers carry `Cache-Control` and an `ETag`, so please cache on your side and honor them:
 
@@ -254,7 +254,7 @@ curl -s 'http://127.0.0.1:4100/v1/metadata?package=example@1.0.0'
 
 ### `GET /v1/stars`
 
-GitHub stars of a `repository` (`owner/name`), today: GitHub keeps no history of them to ask for. `stars` is null when GitHub did not say.
+GitHub stars of a `repository` (`owner/name`), today: GitHub keeps no history of them to ask for. `stars` is null when GitHub did not say, and for a repository no measured package names as its own: GitHub is asked only about those, spelled as the package's `repositoryUrl` spells them.
 
 ```json
 { "stars": 42 }

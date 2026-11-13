@@ -106,6 +106,13 @@ Agents that send `Accept: text/markdown` get Markdown at a page's own address. C
 
 Under **SSL/TLS → Edge Certificates**, turn on **Always Use HTTPS**.
 
+The worker's routes (`/internal/*`) are not for the internet. The API already answers 404 there to anything that came through Cloudflare (it carries `cf-connecting-ip`, the `CLIENT_IP_HEADER` the setup script wrote); a rule keeps such requests from reaching the server at all:
+
+**Your domain → Security → WAF → Custom rules → Create rule**
+
+- **When:** Hostname equals `api.example.com` _and_ URI Path starts with `/internal`.
+- **Then:** **Block**.
+
 ## Everyday commands
 
 Log in with `ssh root@<address>`, then `cd /opt/weighme`:

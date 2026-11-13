@@ -4,6 +4,19 @@ What changed on weighme and in its [API](API.md), newest first. New measurements
 
 API releases carry the version of the `/v1` contract; how it is versioned is at the [end of this page](#versioning-policy).
 
+## 2026-11-14
+
+### API 1.0.1
+
+- `GET /v1/analyses` and the MCP tool `get_package_cost` count against the small limit of queueing when they add a package to the queue, and answer `429` past it. Asking for a package that is known or already waiting is unchanged.
+- `GET /v1/stars` answers `null` for a repository no measured package names: GitHub is asked only about those.
+- `GET /v1/history` answers `503` at once when too many packages are being looked up in the registry, and repeats a failed look-up for a minute instead of asking again.
+
+### Measuring
+
+- A package that imports a file outside itself and its dependencies fails to bundle, and the message of a failure no longer quotes code.
+- An install is stopped as soon as it passes the size limit, not after it has finished.
+
 ## 2026-11-05
 
 ### Measuring

@@ -26,6 +26,40 @@ describe('the registry readers', () => {
         expect(fetchMock).toHaveBeenCalledTimes(3);
     });
 
+    it('keep the failure of a full document for a while: asking again would read it all again', async () => {
+        let time = 0;
+        const fetchMock = vi.fn(async () => new Response('', { status: 404 }));
+        vi.stubGlobal('fetch', fetchMock);
+        const list = createVersionLister(() => time);
+        await expect(list('missing')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(list('missing')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        time = 60_000;
+        await expect(list('missing')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('read few full documents at a time, and refuse at once when too many already wait', async () => {
+        const answers: (() => void)[] = [];
+        const fetchMock = vi.fn(() => new Promise<Response>((resolve) => answers.push(() => resolve(Response.json(DOCUMENT)))));
+        vi.stubGlobal('fetch', fetchMock);
+        const list = createVersionLister();
+        // Two are read and eight wait; the eleventh is told to come back, and is not remembered as a failure of its package.
+        const asked = Array.from({ length: 10 }, (_, index) => list(`package-${index}`));
+        await expect(list('one-too-many')).rejects.toMatchObject({ code: 'UNAVAILABLE', message: expect.stringContaining('Too many') });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        while (answers.length > 0 || fetchMock.mock.calls.length < 10) {
+            answers.shift()?.();
+            await new Promise((resolve) => setImmediate(resolve));
+        }
+        expect((await Promise.all(asked)).every((versions) => versions.length === 2)).toBe(true);
+        answers.length = 0;
+        const again = list('one-too-many');
+        await new Promise((resolve) => setImmediate(resolve));
+        answers.shift()?.();
+        expect(await again).toHaveLength(2);
+    });
+
     it('do not keep a failure, and say what went wrong', async () => {
         const fetchMock = vi
             .fn()

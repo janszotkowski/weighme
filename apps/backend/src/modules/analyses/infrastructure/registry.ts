@@ -117,25 +117,41 @@ const CACHE_MAX = 500;
 
 /**
  * A small cache for what an outside service would rather not be asked often. A value being fetched is shared with everyone
- * who asks for it meanwhile, so a burst of the same question costs one request. A failure is not kept. Past `CACHE_MAX`
+ * who asks for it meanwhile, so a burst of the same question costs one request. A failure is not kept, unless `failureTtl`
+ * says for how long: where asking is costly, the same failure is then answered from here for a while. Past `CACHE_MAX`
  * entries the oldest goes.
  */
-const remember = <T>(now: () => number, ttlMs: number) => {
+const remember = <T>(now: () => number, ttlMs: number, failureTtl: (error: unknown) => number = () => 0) => {
     const cache = new Map<string, { value: T; until: number }>();
+    const failures = new Map<string, { error: unknown; until: number }>();
     const pending = new Map<string, Promise<T>>();
     return {
         /** The value for `key`: kept, on its way for someone else, or made now. `ttl` may give a value its own lifetime. */
         share: (key: string, make: () => Promise<T>, ttl: (value: T) => number = () => ttlMs): Promise<T> => {
             const entry = cache.get(key);
             if (entry !== undefined && now() < entry.until) return Promise.resolve(entry.value);
+            const failure = failures.get(key);
+            if (failure !== undefined && now() < failure.until) return Promise.reject(failure.error);
             const inFlight = pending.get(key);
             if (inFlight !== undefined) return inFlight;
             const promise = make()
-                .then((value) => {
-                    if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value ?? key);
-                    cache.set(key, { value, until: now() + ttl(value) });
-                    return value;
-                })
+                .then(
+                    (value) => {
+                        if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value ?? key);
+                        cache.set(key, { value, until: now() + ttl(value) });
+                        failures.delete(key);
+                        return value;
+                    },
+                    (error: unknown) => {
+                        const keptMs = failureTtl(error);
+                        if (keptMs > 0) {
+                            failures.delete(key);
+                            if (failures.size >= CACHE_MAX) failures.delete(failures.keys().next().value ?? key);
+                            failures.set(key, { error, until: now() + keptMs });
+                        }
+                        throw error;
+                    },
+                )
                 .finally(() => pending.delete(key));
             pending.set(key, promise);
             return promise;
@@ -143,12 +159,21 @@ const remember = <T>(now: () => number, ttlMs: number) => {
     };
 };
 
-/** Runs tasks at most `limit` at a time; the rest wait their turn, in order. */
-const atMost = (limit: number) => {
+/** What a full line answers: the one failure that says nothing about the question asked, so it is never kept for it. */
+const BUSY = new AppError('UNAVAILABLE', 'Too many packages are being looked up; try again in a moment');
+
+/**
+ * Runs tasks at most `limit` at a time; the rest wait their turn, in order, and at most `maxWaiting` of them: one more is
+ * refused at once, so a burst of costly questions is answered "later" instead of growing a line nobody waits at the end of.
+ */
+const atMost = (limit: number, maxWaiting: number) => {
     let running = 0;
     const waiting: (() => void)[] = [];
     return async <T>(task: () => Promise<T>): Promise<T> => {
-        if (running >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+        if (running >= limit) {
+            if (waiting.length >= maxWaiting) throw BUSY;
+            await new Promise<void>((resolve) => waiting.push(resolve));
+        }
         running++;
         try {
             return await task();
@@ -197,6 +222,10 @@ export const searchRegistry: PackageSearcher = async (query) => parseSearch(awai
 const VERSIONS_TTL_MS = 10 * 60_000;
 /** The registry's full documents run to tens of megabytes and are parsed on the one thread that serves requests: few at a time. */
 const FULL_DOCUMENTS_AT_ONCE = 2;
+/** A document takes a second or two, and a request gives up after fifteen: nobody is still there for one further back. */
+const FULL_DOCUMENTS_WAITING = 8;
+/** A document that could not be read (no such package, too large, no answer) is not asked for again at once: each try may read tens of megabytes. */
+const VERSIONS_FAILURE_TTL_MS = 60_000;
 
 /**
  * The releases worth showing for a package, with their dates. Only the registry's full document has the dates, and it runs
@@ -204,8 +233,8 @@ const FULL_DOCUMENTS_AT_ONCE = 2;
  * package reads the document once.
  */
 export const createVersionLister = (now: () => number = Date.now): VersionLister => {
-    const cache = remember<ReleasedVersion[]>(now, VERSIONS_TTL_MS);
-    const fewAtATime = atMost(FULL_DOCUMENTS_AT_ONCE);
+    const cache = remember<ReleasedVersion[]>(now, VERSIONS_TTL_MS, (error) => (error === BUSY ? 0 : VERSIONS_FAILURE_TTL_MS));
+    const fewAtATime = atMost(FULL_DOCUMENTS_AT_ONCE, FULL_DOCUMENTS_WAITING);
     return (name) =>
         cache.share(name, () =>
             fewAtATime(async () => {

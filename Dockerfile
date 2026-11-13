@@ -7,7 +7,7 @@
 # The Node and pnpm versions are the ones in .node-version and package.json: change them together (`pnpm policy` fails when they differ).
 # The base image is pinned by digest: a re-pushed tag cannot change what is built.
 
-FROM node:24.22.1-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS base
+FROM node:24.22.2-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS base
 ENV PNPM_HOME=/pnpm CI=true COREPACK_HOME=/corepack COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 ENV PATH=$PNPM_HOME:$PATH
 WORKDIR /repo
@@ -38,7 +38,7 @@ COPY apps/worker apps/worker
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store pnpm --filter @weighme/worker build \
     && pnpm --filter @weighme/worker deploy --prod --prefer-offline --store-dir /pnpm/store /out/worker
 
-FROM node:24.22.1-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS worker
+FROM node:24.22.2-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS worker
 # The worker installs packages with pnpm when it runs: the one Corepack verified in the base stage, as its native binary
 # and not through Corepack's shim, which would obey the `packageManager` field of whatever package is being measured.
 COPY --from=base /corepack/v1/pnpm /opt/pnpm
@@ -63,7 +63,7 @@ COPY apps/backend apps/backend
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store pnpm --filter @weighme/backend build \
     && pnpm --filter @weighme/backend deploy --prod --prefer-offline --store-dir /pnpm/store /out/backend
 
-FROM node:24.22.1-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS backend
+FROM node:24.22.2-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS backend
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=4100 DATABASE_PATH=/data/weighme.db
 WORKDIR /app
 COPY --from=backend-build --chown=node:node /out/backend/package.json ./
@@ -95,7 +95,7 @@ COPY apps/frontend apps/frontend
 COPY docs docs
 RUN pnpm --filter @weighme/frontend build
 
-FROM node:24.22.1-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS frontend
+FROM node:24.22.2-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS frontend
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3100
 WORKDIR /app
 # Nitro's output carries its own dependencies.

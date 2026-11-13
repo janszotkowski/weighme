@@ -13,7 +13,7 @@ For anything larger than a small fix, please open an issue first so we can agree
 
 ## Development setup
 
-You need Node 24.22.1 (`.node-version`), pnpm 12 and Docker. The README's [Getting Started](README.md#-getting-started) has the full steps:
+You need Node 24.22.2 (`.node-version`), pnpm 12 and Docker. The README's [Getting Started](README.md#-getting-started) has the full steps:
 
 ```bash
 pnpm install

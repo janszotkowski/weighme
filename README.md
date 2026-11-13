@@ -87,7 +87,7 @@ tools            Policy check, smoke test, .env initializer, oxlint plugin
 
 ## 🚀 Getting Started
 
-You need **Node 24.22.1** (see `.node-version`), **pnpm 12** (the exact version is pinned in `package.json` and fetched automatically) and **Docker**.
+You need **Node 24.22.2** (see `.node-version`), **pnpm 12** (the exact version is pinned in `package.json` and fetched automatically) and **Docker**.
 
 ```bash
 git clone https://github.com/janszotkowski/weighme.git

@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { gzip as gzipCallback, brotliCompress as brotliCallback, constants } from 'node:zlib';
 import { promisify } from 'node:util';
 import type { AnalysisResult } from '@weighme/core';
@@ -15,16 +15,25 @@ const brotli = promisify(brotliCallback);
 
 export const BUNDLER = { name: 'rolldown', version: VERSION };
 
+const OUTSIDE = 'The package imports a file outside itself and its dependencies';
+
 export type Bundle = { files: Buffer[]; exports: string[]; environment: AnalysisResult['environment']; composition: AnalysisResult['composition'] };
+
+/** A path as a pattern that matches only itself. */
+const literal = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
  * The bundle's files, what its entry exports and what it needs that no browser has. Only the bundler reads the package
  * here: it parses the code and never runs it. An entry that cannot be resolved throws, and so does a bundle with nothing
  * of the package in it: both would otherwise show a few bytes as if that were the package's real size.
+ *
+ * Nothing outside `cwd` (the job's folder, by its real path) is read: a package may import any path, and the bundler
+ * quotes a file it cannot parse in its error, which is how another process's environment would reach a public page.
  */
 export const bundle = async (entry: string, cwd: string, peers: readonly string[]): Promise<Bundle> => {
     const fatal: string[] = [];
     let unresolvedImports = 0;
+    let reachedOutside = false;
     const use: NodeUse = { builtins: new Set(), nativeAddons: new Set() };
     let files: Buffer[];
     let exports: string[];
@@ -36,6 +45,21 @@ export const bundle = async (entry: string, cwd: string, peers: readonly string[
             platform: 'browser',
             external: createExternal({ peers, use, isInstalled: (name) => existsSync(join(cwd, 'node_modules', name)) }),
             transform: { define: { 'process.env.NODE_ENV': '"production"' } },
+            plugins: [
+                {
+                    name: 'weighme-inside-the-job',
+                    // The filter runs in the bundler itself, on the path a link resolved to: the handler hears only of files outside the folder.
+                    load: {
+                        filter: { id: { exclude: new RegExp(`^${literal(`${cwd}${sep}`)}`) } },
+                        handler: (id) => {
+                            // The bundler's own modules have no file.
+                            if (id.startsWith('\0')) return null;
+                            reachedOutside = true;
+                            throw new Error(OUTSIDE);
+                        },
+                    },
+                },
+            ],
             onLog: (_level, log) => {
                 if (log.code !== 'UNRESOLVED_IMPORT') return;
                 unresolvedImports++;
@@ -51,7 +75,8 @@ export const bundle = async (entry: string, cwd: string, peers: readonly string[
         exports = output.flatMap((file) => (file.type === 'chunk' && file.isEntry ? file.exports : []));
         modules = output.flatMap((file) => (file.type === 'chunk' ? Object.entries(file.modules).map(([id, module]): [string, number] => [id, module.renderedLength]) : []));
     } catch (error) {
-        throw new AnalysisError('BUNDLE_FAILED', error instanceof Error ? error.message : String(error));
+        // Said in our own words: the bundler's text for this carries a stack of this machine's paths.
+        throw new AnalysisError('BUNDLE_FAILED', reachedOutside ? OUTSIDE : error instanceof Error ? error.message : String(error));
     }
     if (fatal.length > 0) throw new NoEntryError(fatal.join('\n'));
     if (!modules.some(([id]) => id.includes('node_modules'))) throw new EmptyEntryError('The bundle contains nothing of the package');

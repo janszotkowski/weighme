@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -44,6 +44,24 @@ describe('measuring an ES module', () => {
         const { exports, text } = await measure('export const named = "named-code";\n');
         expect(exports).toEqual(['named']);
         expect(text).toContain('named-code');
+    });
+
+    it("reads nothing outside the job's folder, by a path or through a link, and quotes none of it", async () => {
+        const outside = await realpath(await mkdtemp(join(tmpdir(), 'weighme-outside-')));
+        try {
+            await writeFile(join(outside, 'environ'), 'WORKER_TOKEN=do-not-show');
+            await expect(measure(`import ${JSON.stringify(join(outside, 'environ'))};\nexport const named = 1;\n`)).rejects.toMatchObject({
+                code: 'BUNDLE_FAILED',
+                message: expect.stringContaining('outside'),
+            });
+            await symlink(join(outside, 'environ'), join(dir, 'node_modules', 'fixture', 'link.js'));
+            const linked = await measure('import "./link.js";\nexport const named = 1;\n').catch((error: unknown) => error);
+            expect(linked).toMatchObject({ code: 'BUNDLE_FAILED' });
+            expect(String((linked as Error).message)).not.toContain('do-not-show');
+            expect(String((linked as Error).message)).not.toContain(outside);
+        } finally {
+            await rm(outside, { recursive: true, force: true });
+        }
     });
 
     it('says so when the entry exports nothing at all', async () => {

@@ -15,7 +15,7 @@
         "@hono/node-server": "2.1.3",
         "@modelcontextprotocol/server": "2.4.0",
         "@weighme/core": "workspace:*",
-        "hono": "4.13.12",
+        "hono": "4.13.16",
         "ip-address": "10.7.4",
         "pino": "10.4.0",
         "zod": "4.6.7"

@@ -46,7 +46,7 @@ describe('rate limiter', () => {
     });
 
     it('holds at most maxKeys callers apart; the rest share one count', () => {
-        const limiter = createRateLimiter({ limit: 2, windowMs: 60_000, maxKeys: 2, now: () => 0 });
+        const limiter = createRateLimiter({ limit: 2, windowMs: 60_000, maxKeys: 2, overflowCallers: 1, now: () => 0 });
         expect(limiter.hit('a').allowed).toBe(true);
         expect(limiter.hit('b').allowed).toBe(true);
         // A third and a fourth caller are one to the limiter: the second of them is already past the shared count.
@@ -55,6 +55,28 @@ describe('rate limiter', () => {
         expect(limiter.hit('e').allowed).toBe(false);
         // Callers it knows keep their own count.
         expect(limiter.hit('a').allowed).toBe(true);
+    });
+
+    it("gives the newcomers past maxKeys many callers' worth between them, so that a full map does not shut new visitors out", () => {
+        const limiter = createRateLimiter({ limit: 1, windowMs: 60_000, maxKeys: 1, overflowCallers: 3, now: () => 0 });
+        expect(limiter.hit('a').allowed).toBe(true);
+        expect(['b', 'c', 'd', 'e'].map((caller) => limiter.hit(caller).allowed)).toEqual([true, true, true, false]);
+        // What it reports stays one caller's share, never the shared one.
+        expect(limiter.hit('f')).toMatchObject({ limit: 1, remaining: 0 });
+        expect(limiter.hit('a').allowed).toBe(false);
+    });
+
+    it('sweeps a full map before turning a newcomer to the shared count', () => {
+        let now = 0;
+        const limiter = createRateLimiter({ limit: 1, windowMs: 10_000, maxKeys: 2, overflowCallers: 1, now: () => now });
+        now = 10_000;
+        limiter.hit('early');
+        now = 16_000;
+        expect([limiter.hit('a').allowed, limiter.hit('b').allowed]).toEqual([true, true]);
+        // Every window has ended, and the regular sweep is not due until 30 000: without one now, `c` and `d` would
+        // share a single count.
+        now = 26_000;
+        expect([limiter.hit('c').allowed, limiter.hit('d').allowed]).toEqual([true, true]);
     });
 
     it('forgets windows that ended', () => {

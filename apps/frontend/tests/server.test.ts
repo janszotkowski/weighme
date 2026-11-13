@@ -61,10 +61,18 @@ describe('the share-image limiter', () => {
     });
 
     it('holds at most maxKeys keys apart; newcomers past that share one count', () => {
-        const limiter = fixedWindowLimiter({ limit: 1, windowMs: 1000, maxKeys: 1 });
+        const limiter = fixedWindowLimiter({ limit: 1, windowMs: 1000, maxKeys: 1, overflowKeys: 1 });
         expect(limiter.take('a', 0)).toBe(true);
         expect(limiter.take('b', 0)).toBe(true);
         expect(limiter.take('c', 0)).toBe(false);
+    });
+
+    it("gives the newcomers past maxKeys many keys' worth between them, so that a full map does not shut new visitors out", () => {
+        const limiter = fixedWindowLimiter({ limit: 1, windowMs: 1000, maxKeys: 1, overflowKeys: 3 });
+        expect(limiter.take('a', 0)).toBe(true);
+        expect([limiter.take('b', 0), limiter.take('c', 0), limiter.take('d', 0), limiter.take('e', 0)]).toEqual([true, true, true, false]);
+        // A key it knows keeps its own count.
+        expect(limiter.take('a', 0)).toBe(false);
     });
 });
 

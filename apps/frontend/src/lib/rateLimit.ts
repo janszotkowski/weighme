@@ -2,9 +2,12 @@
  * A fixed-window counter per key (a visitor's address): `take(key)` is true while the key has asked at most `limit`
  * times in the current window. Every window starts empty, so memory never holds more than one window's keys; past
  * `maxKeys` different keys in one window, the newcomers share one count, so a flood of addresses cannot grow it either.
+ * That count is `overflowKeys` keys' worth: it bounds memory, and with one key's share whoever filled the map would
+ * leave every new visitor a single share between them.
  */
-export const fixedWindowLimiter = (options: { limit: number; windowMs: number; maxKeys?: number }) => {
+export const fixedWindowLimiter = (options: { limit: number; windowMs: number; maxKeys?: number; overflowKeys?: number }) => {
     const maxKeys = options.maxKeys ?? 10_000;
+    const overflowLimit = options.limit * (options.overflowKeys ?? 50);
     let windowStart = Number.NEGATIVE_INFINITY;
     const counts = new Map<string, number>();
     return {
@@ -16,7 +19,7 @@ export const fixedWindowLimiter = (options: { limit: number; windowMs: number; m
             const bucket = counts.has(key) || counts.size < maxKeys ? key : '*';
             const count = (counts.get(bucket) ?? 0) + 1;
             counts.set(bucket, count);
-            return count <= options.limit;
+            return count <= (bucket === '*' && key !== '*' ? overflowLimit : options.limit);
         },
     };
 };

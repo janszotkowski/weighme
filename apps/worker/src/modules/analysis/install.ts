@@ -20,11 +20,15 @@ strictDepBuilds: false
 
 const stderrOf = (error: unknown): string => (typeof error === 'object' && error !== null && 'stderr' in error ? String(error.stderr) : String(error));
 
+/** How often the folder is weighed while pnpm fills it. */
+const WATCH_MS = 2000;
+
 /**
  * Installs the package into `dir` without running a single script of it or of its dependencies. The user-level npm and
- * pnpm configuration is replaced by empty files: tokens in `~/.npmrc` are not for this install to see.
+ * pnpm configuration is replaced by empty files: tokens in `~/.npmrc` are not for this install to see. The folder is
+ * weighed as it fills, and the install stopped past `maxBytes`: checked only afterwards, a package could fill the disk first.
  */
-export const installPackage = async (ref: PackageRef, dir: string, storeDir: string): Promise<void> => {
+export const installPackage = async (ref: PackageRef, dir: string, storeDir: string, maxBytes: number): Promise<void> => {
     await mkdir(dir, { recursive: true });
     const userConfig = join(dir, '.user-npmrc');
     await Promise.all([
@@ -33,14 +37,35 @@ export const installPackage = async (ref: PackageRef, dir: string, storeDir: str
         writeFile(join(dir, '.npmrc'), 'registry=https://registry.npmjs.org/\n'),
         writeFile(userConfig, ''),
     ]);
+    const stop = new AbortController();
+    let tooLarge: AnalysisError | undefined;
+    let weighing = false;
+    const watch = setInterval(() => {
+        if (weighing) return;
+        weighing = true;
+        measureInstall(dir, maxBytes)
+            .catch((error: unknown) => {
+                // Anything else is a file pnpm moved while the folder was read: the next look will do.
+                if (!(error instanceof AnalysisError)) return;
+                tooLarge = error;
+                stop.abort();
+            })
+            .finally(() => {
+                weighing = false;
+            });
+    }, WATCH_MS);
     try {
         await run('pnpm', ['install', '--ignore-scripts', '--prod', '--store-dir', storeDir, '--reporter=silent'], {
             cwd: dir,
             env: { ...process.env, NPM_CONFIG_USERCONFIG: userConfig, XDG_CONFIG_HOME: join(dir, '.config') },
             maxBuffer: 1024 * 1024,
+            signal: stop.signal,
+            killSignal: 'SIGKILL',
         });
     } catch (error) {
-        throw new AnalysisError('INSTALL_FAILED', stderrOf(error));
+        throw tooLarge ?? new AnalysisError('INSTALL_FAILED', stderrOf(error));
+    } finally {
+        clearInterval(watch);
     }
 };
 

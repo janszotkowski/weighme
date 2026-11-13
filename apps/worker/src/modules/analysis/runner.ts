@@ -55,19 +55,26 @@ export const runAnalysis = async (
                 else if (!finished) deliver({ kind: 'exports-failure' });
                 resolve();
             };
-            const timer = setTimeout(() => {
-                timedOut = true;
+            const killGroup = (): void => {
                 if (child.pid === undefined) return;
                 try {
                     process.kill(-child.pid, 'SIGKILL');
                 } catch {
                     // The group is already gone.
                 }
+            };
+            const timer = setTimeout(() => {
+                timedOut = true;
+                killGroup();
             }, config.JOB_TIMEOUT_MS);
 
             child.on('message', (message) => deliver(message as AnalyzeMessage));
             child.once('error', (error) => end(error.message));
-            child.once('exit', (code, signal) => end(timedOut ? `The analysis took longer than ${config.JOB_TIMEOUT_MS} ms` : `The analysis process ended early (${signal ?? code})`));
+            child.once('exit', (code, signal) => {
+                // An install given up on half-way may have left a pnpm behind, still writing to the folder about to be removed.
+                killGroup();
+                end(timedOut ? `The analysis took longer than ${config.JOB_TIMEOUT_MS} ms` : `The analysis process ended early (${signal ?? code})`);
+            });
             child.send(request);
         });
         await handled;

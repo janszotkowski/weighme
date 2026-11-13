@@ -18,7 +18,7 @@ const elapsed = (from: number): number => Math.round(performance.now() - from);
 /** One package from nothing to its numbers. The package's code is read, never run. */
 export const analyze = async (ref: PackageRef, options: AnalyzeOptions): Promise<Analysis> => {
     const installStarted = performance.now();
-    await installPackage(ref, options.dir, options.storeDir);
+    await installPackage(ref, options.dir, options.storeDir, options.maxInstallBytes);
     const install = await measureInstall(options.dir, options.maxInstallBytes);
     const installMs = elapsed(installStarted);
 

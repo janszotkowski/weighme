@@ -22,17 +22,25 @@ const stop = new AbortController();
 const jobsDir = join(config.WORKER_DIR, 'jobs');
 const storeDir = join(config.WORKER_DIR, 'store');
 
-/** How often the store's size is looked at: walking it costs something, and it grows by one package at a time. */
+/** How often the store's size is looked at whatever happened: walking it costs something, and it grows by one package at a time. */
 const STORE_CHECK_MS = 60 * 60_000;
 let storeChecked = Number.NEGATIVE_INFINITY;
+/**
+ * What was installed since the store was last weighed. A failed analysis says nothing of what it left there (an install
+ * stopped half-way, a package too large), so after one it is unknown, and the store is weighed.
+ */
+let installedSince = 0;
 
 /**
  * The shared store keeps every package ever installed here, so that the next analysis downloads less; past its limit it
  * is emptied whole, since nothing in it is referenced once a job's folder is gone. Only ever run with no job in flight.
+ * It is weighed every hour, and sooner once a tenth of its limit may have been added: an hour of large packages would
+ * otherwise fill the disk the limit is there to keep free.
  */
 const trimStore = async (): Promise<void> => {
-    if (performance.now() - storeChecked < STORE_CHECK_MS) return;
+    if (performance.now() - storeChecked < STORE_CHECK_MS && installedSince < config.STORE_MAX_BYTES / 10) return;
     storeChecked = performance.now();
+    installedSince = 0;
     const bytes = await folderBytes(storeDir);
     if (bytes <= config.STORE_MAX_BYTES) return;
     await rm(storeDir, { recursive: true, force: true });
@@ -74,12 +82,14 @@ const slot = async (index: number): Promise<void> => {
                     await runAnalysis(job.package, config, async (message) => {
                         switch (message.kind) {
                             case 'result': {
+                                installedSince += message.result.install.bytes;
                                 const accepted = await backend.complete(job.id, message.result);
                                 if (accepted) logger.info({ package: job.package, ms: ms(), sizes: message.result.sizes }, 'analyzed');
                                 else logger.warn({ package: job.package, ms: ms() }, 'analyzed too late: the backend had given the job away');
                                 break;
                             }
                             case 'failure':
+                                installedSince = Number.POSITIVE_INFINITY;
                                 await backend.fail(job.id, message.failure);
                                 logger.warn({ package: job.package, ms: ms(), failure: message.failure }, 'analysis failed');
                                 break;

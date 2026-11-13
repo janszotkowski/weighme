@@ -43,6 +43,10 @@ export const MIGRATIONS: readonly string[] = [
     DROP INDEX analyses_queue;
     CREATE INDEX analyses_queue ON analyses (status, priority, requested_at);
     `,
+    // Whether a measured package names a repository is asked before GitHub is, for every row of the trends table.
+    `
+    CREATE INDEX analyses_repository ON analyses (json_extract(result, '$.repositoryUrl'));
+    `,
 ];
 
 /** Opens (and creates) the database, tuned for one writer and a few readers, and applies the migrations it lacks. */

@@ -11,7 +11,7 @@ import { TREND_RANGES, downloadsResponseSchema, starsResponseSchema } from './tr
  * parameter, a field), the patch with a fix to what is documented. A breaking change is a new path (`/v2`), never this.
  * docs/CHANGELOG.md lists every version.
  */
-export const API_VERSION = '1.0.0';
+export const API_VERSION = '1.0.1';
 
 /** The answer of `GET /v1/health`. */
 const healthResponseSchema = z.object({ status: z.literal('ok'), version: z.string() });
@@ -140,7 +140,7 @@ export const openApiDocument = ({ rateLimitPerMinute = 300, docsUrl = 'https://g
                 'getStars',
                 'GitHub stars of a repository, today',
                 [required('repository', 'The repository as `owner/name`.', { type: 'string', example: 'facebook/react' })],
-                json('StarsResponse', 'Null when GitHub did not say'),
+                json('StarsResponse', 'Null when GitHub did not say, and for a repository no measured package names'),
                 errors('400', '429', '503'),
             ),
         },

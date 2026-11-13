@@ -69,13 +69,17 @@ const envSchema = z
         RATE_LIMIT_MCP_TOTAL_PER_MINUTE: z.coerce.number().int().min(1).max(100_000).default(1200),
         /** Requests the frontend's rendering may make per minute for one visitor: a page asks for several things at once. */
         RATE_LIMIT_RENDER_PER_MINUTE: z.coerce.number().int().min(1).max(100_000).default(600),
-        /** Times one caller may queue a package's versions (`POST /v1/history`) per minute: each has the worker download them. */
+        /**
+         * Packages one caller may add to the queue per minute by asking what they cost, and times it may queue a package's
+         * versions (`POST /v1/history`): each has the worker download them. Asking for what is known costs none of it.
+         */
         RATE_LIMIT_QUEUE_PER_MINUTE: z.coerce.number().int().min(1).max(100_000).default(10),
         /**
          * The header the proxy in front of the API writes the caller's address into (`cf-connecting-ip` behind Cloudflare,
          * `x-real-ip` behind nginx or Caddy). Unset, the address of the connection is used. Set it only behind a proxy that
          * overwrites the header: otherwise a caller can choose its own address and escape the limit. A header a proxy appends
-         * to (`x-forwarded-for`, `forwarded`) is refused: its first entry is the caller's word.
+         * to (`x-forwarded-for`, `forwarded`) is refused: its first entry is the caller's word. A request carrying this header
+         * came through the proxy, so `/internal/*`, which only the worker inside the machine calls, answers it 404.
          */
         CLIENT_IP_HEADER: optionalText
             .transform((value) => value?.toLowerCase())

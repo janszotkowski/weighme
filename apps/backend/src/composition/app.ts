@@ -32,6 +32,6 @@ export const createApp = (container: Container): Hono<AppEnv> => {
         );
     }
     app.route('/v1', analysisRoutes(container, { rateLimitPerMinute: container.config.RATE_LIMIT_PER_MINUTE }));
-    app.route('/internal', workerRoutes(container.store, container.config.WORKER_TOKEN));
+    app.route('/internal', workerRoutes(container.store, container.config.WORKER_TOKEN, container.config.CLIENT_IP_HEADER));
     return app;
 };

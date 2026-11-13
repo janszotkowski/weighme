@@ -30,6 +30,9 @@ const store = createAnalysisStore(db, {
     maxAttempts: config.JOB_MAX_ATTEMPTS,
     failedRetryMs: config.JOB_FAILED_RETRY_MINUTES * 60_000,
 });
+// A new way of measuring serves none of the old one's results, and what the old one left waiting is never claimed.
+const forgotten = store.forgetOutdated();
+if (forgotten > 0) logger.info({ rows: forgotten }, 'outdated analyses removed');
 // The planner's statistics follow the data: results arrive all day, so now and then, and once more before the file is closed.
 const OPTIMIZE_EVERY_MS = 60 * 60_000;
 setInterval(() => {

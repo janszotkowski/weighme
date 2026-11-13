@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { AGENT_LIST_LIMIT, analysisForAgent, isExactVersion, parseSpec, type PackageSpec } from '@weighme/core';
 import { McpServer, createMcpHandler, type CallToolResult, type ToolAnnotations } from '@modelcontextprotocol/server';
 import { Hono } from 'hono';
@@ -28,6 +29,11 @@ const specOf = (value: string): PackageSpec => {
     return spec;
 };
 
+/** The share of queueing of the caller whose request is being answered (`AppEnv`): the tools run inside the handler, past the route. */
+const queueShares = new AsyncLocalStorage<() => void>();
+
+const noShare = (): void => undefined;
+
 /** One server's tools; a server is made per request, so nothing is kept between calls. */
 export const createPackageMcpServer = (deps: McpDeps): McpServer => {
     const server = new McpServer({ name: 'weighme', title: 'weighme', version: deps.version }, { instructions: INSTRUCTIONS });
@@ -50,7 +56,7 @@ export const createPackageMcpServer = (deps: McpDeps): McpServer => {
             inputSchema: z.object({ package: packageSpec }),
             annotations: MEASURES,
         },
-        (input) => answer(async () => analysisForAgent(await lookUpAnalysis(deps, specOf(input.package)))),
+        (input) => answer(async () => analysisForAgent(await lookUpAnalysis(deps, specOf(input.package), queueShares.getStore() ?? noShare))),
     );
 
     server.registerTool(
@@ -91,7 +97,7 @@ export const mcpRoutes = (deps: McpDeps): Hono<AppEnv> => {
             c.set('errorCode', 'UNAUTHORIZED');
             return c.json(errorBody('UNAUTHORIZED', 'This origin may not use the MCP endpoint', c.get('requestId')), 403);
         }
-        return handler.fetch(c.req.raw);
+        return queueShares.run(c.get('queueShare'), () => handler.fetch(c.req.raw));
     });
     return routes;
 };

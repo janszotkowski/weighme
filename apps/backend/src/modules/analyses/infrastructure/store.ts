@@ -17,6 +17,14 @@ type Row = {
     priority: number;
 };
 
+/** One line of `GET /v1/packages`. */
+export type MeasuredPackage = { name: string; measuredAt: string };
+
+/** What a history shows of one version. The sizes are null until it is measured, and for a package with nothing to import. */
+export type VersionSummary = { status: string; gzip: number | null; minified: number | null };
+
+const MEASURED_TTL_MS = 5 * 60_000;
+
 export type StoreOptions = { maxWaiting: number; leaseMs: number; maxAttempts: number; failedRetryMs: number; now?: () => number };
 
 /** 0 is someone waiting for this package; 1 is an older version measured on request, after anything that is waited for. */
@@ -47,7 +55,18 @@ export const createAnalysisStore = (db: Database, options: StoreOptions) => {
 
     const measured = db.prepare("SELECT name, max(finished_at) AS finished_at FROM analyses WHERE status = 'done' AND analyzer_version = ? GROUP BY name ORDER BY name LIMIT ?");
     const select = db.prepare('SELECT * FROM analyses WHERE name = ? AND version = ? AND analyzer_version = ?');
-    const waiting = db.prepare("SELECT count(*) AS waiting FROM analyses WHERE status = 'queued' AND priority = ?");
+    // Of this way of measuring only: what was queued for an older one is never claimed, and must not take the room of what is.
+    const waiting = db.prepare("SELECT count(*) AS waiting FROM analyses WHERE status = 'queued' AND priority = ? AND analyzer_version = ?");
+    const outdated = db.prepare('DELETE FROM analyses WHERE analyzer_version < ?');
+    const summaries = db.prepare(
+        "SELECT version, status, json_extract(result, '$.sizes.gzip') AS gzip, json_extract(result, '$.sizes.minified') AS minified FROM analyses WHERE name = ? AND analyzer_version = ?",
+    );
+    // A package in a monorepo names its folder after the repository's address: `/` is the character before `0`.
+    const repository = db.prepare(
+        `SELECT 1 AS known FROM analyses
+         WHERE json_extract(result, '$.repositoryUrl') = ? OR (json_extract(result, '$.repositoryUrl') >= ? AND json_extract(result, '$.repositoryUrl') < ?)
+         LIMIT 1`,
+    );
     const running = db.prepare("SELECT count(*) AS running FROM analyses WHERE status = 'running'");
     const insert = db.prepare("INSERT INTO analyses (name, version, analyzer_version, status, requested_at) VALUES (?, ?, ?, 'queued', ?) RETURNING *");
     const insertLater = db.prepare("INSERT OR IGNORE INTO analyses (name, version, analyzer_version, status, requested_at, priority) VALUES (?, ?, ?, 'queued', ?, 1)");
@@ -71,16 +90,46 @@ export const createAnalysisStore = (db: Database, options: StoreOptions) => {
 
     /** Each priority has a line of its own: versions queued for later cannot crowd out what someone is waiting for. */
     const assertRoom = (priority: Priority, adding: number): void => {
-        const { waiting: count } = waiting.get(priority) as { waiting: number };
+        const { waiting: count } = waiting.get(priority, ANALYZER_VERSION) as { waiting: number };
         if (count + adding > options.maxWaiting) {
             throw new AppError('UNAVAILABLE', priority === 0 ? 'Too many packages are waiting to be analyzed; try again in a moment' : 'Too many versions are waiting to be analyzed; try again later');
         }
     };
 
+    let listed: { packages: MeasuredPackage[]; limit: number; until: number } | undefined;
+
     return {
-        /** Every package with a finished measurement, up to a limit. */
-        measuredPackages: (limit: number): { name: string; measuredAt: string }[] =>
-            (measured.all(ANALYZER_VERSION, limit) as { name: string; finished_at: number }[]).map((row) => ({ name: row.name, measuredAt: new Date(row.finished_at).toISOString() })),
+        /**
+         * Every package with a finished measurement, up to a limit. The list reads every finished row, and only a sitemap
+         * asks for it, so it is kept for a few minutes: a package measured meanwhile is listed a little later.
+         */
+        measuredPackages: (limit: number): MeasuredPackage[] => {
+            const at = now();
+            if (listed === undefined || listed.limit !== limit || at >= listed.until) {
+                const rows = measured.all(ANALYZER_VERSION, limit) as { name: string; finished_at: number }[];
+                listed = { packages: rows.map((row) => ({ name: row.name, measuredAt: new Date(row.finished_at).toISOString() })), limit, until: at + MEASURED_TTL_MS };
+            }
+            return listed.packages;
+        },
+
+        /**
+         * The status and the sizes of every version of a package that is known, by version. A history asks for these two
+         * numbers of ten versions every other second: read whole, each would be megabytes of JSON parsed for them.
+         */
+        summaries: (name: string): Map<string, VersionSummary> =>
+            new Map((summaries.all(name, ANALYZER_VERSION) as (VersionSummary & { version: string })[]).map(({ version, ...summary }) => [version, summary])),
+
+        /** Whether a measured package names this GitHub repository (`owner/name`) as its own. */
+        knowsRepository: (ownerAndName: string): boolean => {
+            const url = `https://github.com/${ownerAndName}`;
+            return repository.get(url, `${url}/`, `${url}0`) !== undefined;
+        },
+
+        /**
+         * Removes what an older way of measuring left: its results are no longer served, and what it left waiting is never
+         * claimed. Answers how many rows went. A newer one's rows stay, so that going back a build loses nothing.
+         */
+        forgetOutdated: (): number => Number(outdated.run(ANALYZER_VERSION).changes),
 
         /** What is known of a package, without asking for anything. */
         find: (ref: PackageRef): AnalysisResponse | undefined => {
@@ -88,15 +137,20 @@ export const createAnalysisStore = (db: Database, options: StoreOptions) => {
             return row === undefined ? undefined : toResponse(row);
         },
 
-        /** What is known of a package, queueing it when nothing is, or when its last failure is old enough to try again. */
-        findOrEnqueue: (ref: PackageRef): AnalysisResponse => {
+        /**
+         * What is known of a package, queueing it when nothing is, or when its last failure is old enough to try again.
+         * `beforeQueueing` is called when this adds to the queue, and may throw to refuse: asking for what is known is free.
+         */
+        findOrEnqueue: (ref: PackageRef, beforeQueueing?: () => void): AnalysisResponse => {
             const row = select.get(ref.name, ref.version, ANALYZER_VERSION) as Row | undefined;
             if (row === undefined) {
                 assertRoom(0, 1);
+                beforeQueueing?.();
                 return toResponse(insert.get(ref.name, ref.version, ANALYZER_VERSION, now()) as Row);
             }
             if (row.status === 'failed' && now() - (row.finished_at ?? 0) >= options.failedRetryMs) {
                 assertRoom(0, 1);
+                beforeQueueing?.();
                 return toResponse(requeue.get(now(), row.id) as Row);
             }
             // Someone is now waiting for what was queued for later.

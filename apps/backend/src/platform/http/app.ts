@@ -20,6 +20,11 @@ export type AppEnv = {
         logger: Logger;
         /** The API error code of a failed request, for the access log. */
         errorCode?: string;
+        /**
+         * Counts one package added to the queue against the caller's share of queueing, and throws RATE_LIMITED past it.
+         * Called by a route at the moment it queues, so reading what is already known costs none of that share.
+         */
+        queueShare: () => void;
     };
 };
 
@@ -46,8 +51,10 @@ export const allowedOrigin = (configured: readonly string[], origin: string): st
 /** Compares secrets in constant time; hashing first makes the lengths equal, which `timingSafeEqual` requires. */
 export const sameSecret = (given: string, expected: string): boolean => timingSafeEqual(createHash('sha256').update(given).digest(), createHash('sha256').update(expected).digest());
 
-/** What queues packages to be downloaded, so it has a share of its own, much smaller than the rest of the API. */
+/** What always queues packages to be downloaded, so each request counts against the caller's share of queueing. */
 const QUEUES_WORK = (method: string, path: string): boolean => method === 'POST' && path === '/v1/history';
+
+const TOO_MANY = 'Too many requests; slow down and retry after the time in Retry-After';
 
 /** The HTTP shell every module plugs into: request id, access log, CORS, security headers, the rate limit and one place that turns failures into the error contract. */
 export const createBaseApp = (deps: { config: Config; logger: Logger }): Hono<AppEnv> => {
@@ -96,7 +103,8 @@ export const createBaseApp = (deps: { config: Config; logger: Logger }): Hono<Ap
     // Every caller gets a share of the API; health checks are free. The frontend's own server rendering proves itself with
     // the shared token and asks on behalf of every visitor at once: each visitor it names gets a share of its own (larger,
     // since one page asks for several things). Queueing packages, which has the worker download them, counts against a
-    // much smaller share, so a crawler or a script cannot fill the queue by opening pages.
+    // much smaller share, so a crawler or a script cannot fill the queue by opening pages: a request for a package's
+    // versions always does, and one for a package's cost when it adds that package to the queue (`queueShare`).
     const limiter = createRateLimiter({ limit: deps.config.RATE_LIMIT_PER_MINUTE, windowMs: 60_000 });
     const renderLimiter = createRateLimiter({ limit: deps.config.RATE_LIMIT_RENDER_PER_MINUTE, windowMs: 60_000 });
     const queueLimiter = createRateLimiter({ limit: deps.config.RATE_LIMIT_QUEUE_PER_MINUTE, windowMs: 60_000 });
@@ -119,6 +127,10 @@ export const createBaseApp = (deps: { config: Config; logger: Logger }): Hono<Ap
             return addressIn(visitor) === undefined ? 'render:invalid' : clientKey(visitor, undefined);
         };
         const key = rendering ? renderKey() : clientKey(header, c.env?.incoming?.socket.remoteAddress);
+        c.set('queueShare', () => {
+            const share = queueLimiter.hit(key);
+            if (!share.allowed) throw new AppError('RATE_LIMITED', 'Too many packages asked to be measured; retry after the time in Retry-After', undefined, share.resetSeconds);
+        });
         let result = (rendering ? renderLimiter : limiter).hit(key);
         if (result.allowed && QUEUES_WORK(c.req.method, c.req.path)) result = queueLimiter.hit(key);
         if (result.allowed && c.req.path.startsWith('/v1/mcp')) {
@@ -132,7 +144,7 @@ export const createBaseApp = (deps: { config: Config; logger: Logger }): Hono<Ap
         c.header('ratelimit-limit', String(result.limit));
         c.header('ratelimit-remaining', String(result.remaining));
         c.header('ratelimit-reset', String(result.resetSeconds));
-        if (!result.allowed) throw new AppError('RATE_LIMITED', 'Too many requests; slow down and retry after the time in Retry-After', undefined, result.resetSeconds);
+        if (!result.allowed) throw new AppError('RATE_LIMITED', TOO_MANY, undefined, result.resetSeconds);
         return next();
     });
 

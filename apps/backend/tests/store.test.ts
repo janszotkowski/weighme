@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AnalysisResult, ExportDetails } from '@weighme/core';
+import { ANALYZER_VERSION, type AnalysisResult, type ExportDetails } from '@weighme/core';
 import { openDatabase } from '@modules/analyses/infrastructure/database.ts';
 import { createAnalysisStore } from '@modules/analyses/infrastructure/store.ts';
 
@@ -145,6 +145,78 @@ describe('analysis store', () => {
         expect(store.findOrEnqueue(REF).status).toBe('failed');
         clock.now += 500;
         expect(store.findOrEnqueue(REF).status).toBe('queued');
+    });
+
+    it('answers the status and sizes of every known version of a package at once', () => {
+        const { store } = setup();
+        store.findOrEnqueue(REF);
+        store.complete(store.claim()?.id ?? 0, RESULT);
+        store.findOrEnqueue({ name: 'example', version: '2.0.0' });
+        store.findOrEnqueue({ name: 'other', version: '1.0.0' });
+        expect([...store.summaries('example')]).toEqual([
+            ['1.0.0', { status: 'done', gzip: 200, minified: 300 }],
+            ['2.0.0', { status: 'queued', gzip: null, minified: null }],
+        ]);
+    });
+
+    it('knows the repository of a measured package, in a folder of it too, and no other', () => {
+        const { store } = setup();
+        store.findOrEnqueue(REF);
+        store.complete(store.claim()?.id ?? 0, RESULT);
+        store.findOrEnqueue({ name: 'nested', version: '1.0.0' });
+        store.complete(store.claim()?.id ?? 0, { ...RESULT, repositoryUrl: 'https://github.com/owner/mono/tree/HEAD/packages/nested' });
+        expect(store.knowsRepository('owner/example')).toBe(true);
+        expect(store.knowsRepository('owner/mono')).toBe(true);
+        for (const other of ['owner/exampl', 'owner/example-2', 'owner/example.js', 'owner/mon', 'other/example']) expect(store.knowsRepository(other), other).toBe(false);
+    });
+
+    it('keeps the list of measured packages for a few minutes', () => {
+        const { clock, store } = setup();
+        store.findOrEnqueue(REF);
+        store.complete(store.claim()?.id ?? 0, RESULT);
+        expect(store.measuredPackages(10)).toHaveLength(1);
+        store.findOrEnqueue({ name: 'second', version: '1.0.0' });
+        store.complete(store.claim()?.id ?? 0, RESULT);
+        expect(store.measuredPackages(10)).toHaveLength(1);
+        clock.now += 5 * 60_000;
+        expect(store.measuredPackages(10)).toHaveLength(2);
+    });
+
+    it('counts what it adds to the queue, and nothing for what is known', () => {
+        const { clock, store } = setup();
+        let counted = 0;
+        const count = (): void => void counted++;
+        store.findOrEnqueue(REF, count);
+        store.findOrEnqueue(REF, count);
+        expect(counted).toBe(1);
+        store.fail(store.claim()?.id ?? 0, { code: 'BUNDLE_FAILED', message: 'no' });
+        store.findOrEnqueue(REF, count);
+        expect(counted).toBe(1);
+        clock.now += 500;
+        store.findOrEnqueue(REF, count);
+        expect(counted).toBe(2);
+        // A refusal queues nothing.
+        const refuse = (): void => {
+            throw new Error('not now');
+        };
+        expect(() => store.findOrEnqueue({ name: 'other', version: '1.0.0' }, refuse)).toThrow('not now');
+        expect(store.find({ name: 'other', version: '1.0.0' })).toBeUndefined();
+    });
+
+    it('gives what an older way of measuring left waiting none of the room, and removes it', () => {
+        const db = openDatabase(':memory:');
+        const store = createAnalysisStore(db, { maxWaiting: 1, leaseMs: 100, maxAttempts: 2, failedRetryMs: 500 });
+        const old = db.prepare("INSERT INTO analyses (name, version, analyzer_version, status, requested_at, priority) VALUES (?, '1.0.0', ?, 'queued', 0, ?)");
+        old.run('old-waiting', ANALYZER_VERSION - 1, 0);
+        old.run('old-later', ANALYZER_VERSION - 1, 1);
+        old.run('newer', ANALYZER_VERSION + 1, 0);
+        // The line of this way of measuring is empty, whatever the old one left in it.
+        expect(store.findOrEnqueue(REF).status).toBe('queued');
+        expect(() => store.enqueueLater([{ name: 'later', version: '1.0.0' }])).not.toThrow();
+        expect(store.forgetOutdated()).toBe(2);
+        expect(store.forgetOutdated()).toBe(0);
+        // A newer build's rows stay: going back a build loses nothing.
+        expect((db.prepare('SELECT count(*) AS n FROM analyses').get() as { n: number }).n).toBe(3);
     });
 
     it('refuses new work when too much is waiting', () => {

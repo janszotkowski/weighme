@@ -55,7 +55,7 @@ const setup = (env: Record<string, string> = {}, log?: ReturnType<typeof capture
         readStars: vi.fn(async () => 42),
         readMetadata: vi.fn(async () => ({ name: 'example', version: '1.0.0', deprecated: null, license: 'MIT', types: 'included' as const, typesPackage: null, installScripts: [] })),
     };
-    return { app: createApp(container), store, resolve };
+    return { app: createApp(container), store, resolve, readStars: container.readStars };
 };
 
 const worker = (body?: unknown): RequestInit => ({
@@ -311,9 +311,42 @@ describe('the rate limit', () => {
         // Reading is not queueing.
         expect((await app.request('/v1/history?package=example')).status).toBe(200);
     });
+
+    it('counts a package against that share when asking for its cost queues it, and never when it is known', async () => {
+        const { app, store } = setup({ RATE_LIMIT_QUEUE_PER_MINUTE: '1' });
+        expect((await app.request('/v1/analyses?package=example')).status).toBe(200);
+        // Asking again, by tag or by version, queues nothing.
+        for (const spec of ['example', 'example@2.0.0', 'example@2.0.0']) expect((await app.request(`/v1/analyses?package=${spec}`)).status).toBe(200);
+        const refused = await app.request('/v1/analyses?package=another');
+        expect(refused.status).toBe(429);
+        expect(refused.headers.get('retry-after')).toMatch(/^\d+$/);
+        expect(await refused.json()).toMatchObject({ error: { code: 'RATE_LIMITED' } });
+        // Nothing of it was queued: only the first package is there to take.
+        expect(store.claim()?.package.name).toBe('example');
+        expect(store.claim()).toBeUndefined();
+    });
+
+    it('asks GitHub only about the repository of a measured package', async () => {
+        const { app, store, readStars } = setup();
+        expect(await (await app.request('/v1/stars?repository=owner/example')).json()).toEqual({ stars: null });
+        expect(readStars).not.toHaveBeenCalled();
+        await app.request('/v1/analyses?package=example');
+        store.complete(store.claim()?.id ?? 0, RESULT);
+        expect(await (await app.request('/v1/stars?repository=owner/example')).json()).toEqual({ stars: 42 });
+        expect(await (await app.request('/v1/stars?repository=owner/other')).json()).toEqual({ stars: null });
+        expect(readStars).toHaveBeenCalledTimes(1);
+    });
 });
 
 describe('the worker routes', () => {
+    it('are not there for a request that came through the proxy, whatever token it carries', async () => {
+        const { app } = setup({ CLIENT_IP_HEADER: 'cf-connecting-ip' });
+        const init = worker();
+        const proxied = await app.request('/internal/jobs/claim', { ...init, headers: { ...init.headers, 'cf-connecting-ip': '203.0.113.7' } });
+        expect(proxied.status).toBe(404);
+        expect((await app.request('/internal/jobs/claim', init)).status).toBe(200);
+    });
+
     it('require the token, compared whole', async () => {
         const { app } = setup();
         expect((await app.request('/internal/jobs/claim', { method: 'POST' })).status).toBe(401);

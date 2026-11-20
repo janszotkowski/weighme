@@ -11,7 +11,7 @@ import { formatSizeText } from '@lib/format';
 import { OG_IMAGE_SIZE, clip } from '@lib/head';
 
 /** The dark theme's tokens (`app.css`): the card looks like the site it links to. */
-const COLOR = { background: '#000000', foreground: '#f5f5f7', muted: '#a6a6ae', border: '#26262c', accent: '#3dd68c' };
+const COLOR = { background: '#000000', foreground: '#f5f5f7', muted: '#a6a6ae', border: '#26262c', accent: '#5aa2ff' };
 
 // Vite inlines the font files as data URLs, so the server bundle needs no file next to it at run time. Satori reads
 // WOFF, not WOFF2; latin-ext has a family name of its own because satori falls back only across names.

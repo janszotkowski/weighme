@@ -116,10 +116,10 @@
     --border: rgb(0 0 0 / 8%);
     /* The edge of a form control must reach 3:1 against the page (WCAG 1.4.11), so it is an opaque gray, not a faint hairline. */
     --input: #8a8a94;
-    --ring: #0c6e42;
-    --link: #0c6e42;
-    /* Bars of a chart: the same green, inside the lightness a mark should keep against its page (checked with the dataviz validator). */
-    --bar: #0c6e42;
+    --ring: #1257c2;
+    --link: #1257c2;
+    /* Bars of a chart: the same blue, inside the lightness a mark should keep against its page (checked with the dataviz validator). */
+    --bar: #1257c2;
     /* The top of the fade under a chart's line. The same color needs more of itself to show on a black page. */
     --trend-fill: 32%;
     /* Package colors of the trends chart: four hues apart from each other, each at least 3:1 against the page (WCAG 1.4.11), as tests/design/contrast.test.ts checks. */
@@ -141,7 +141,7 @@
 
     /* Peak strength of the glow at the top of the page. */
     --glow-strength: 10%;
-    --glow-color: #0c6e42;
+    --glow-color: #1257c2;
 
     /* The sticky header's height (a 2.75rem row, 0.5rem above and below, a hairline), so what hangs under it lines up. */
     --site-header-height: calc(3.75rem + 1px);
@@ -168,9 +168,9 @@
     --warning: #f2d14b;
     --border: rgb(255 255 255 / 8%);
     --input: #6b6b75;
-    --ring: #3dd68c;
-    --link: #3dd68c;
-    --bar: #22a868;
+    --ring: #5aa2ff;
+    --link: #5aa2ff;
+    --bar: #2f7fe6;
     --trend-fill: 62%;
     --series-1: #3987e5;
     --series-2: #d95926;
@@ -183,7 +183,7 @@
     --glass-shadow: 0 8px 32px rgb(0 0 0 / 45%);
     --scrim: rgb(0 0 0 / 55%);
     --glow-strength: 14%;
-    --glow-color: #3dd68c;
+    --glow-color: #5aa2ff;
 }
 
 @layer base {
@@ -202,7 +202,7 @@
         @apply bg-background text-foreground;
         font-size: 1rem;
         line-height: 1.5;
-        /* A green glow from the top edge, pinned to the viewport, in both themes. */
+        /* A blue glow from the top edge, pinned to the viewport, in both themes. */
         background-image: radial-gradient(ellipse 80% 60vh at 50% 0%, color-mix(in oklch, var(--glow-color) var(--glow-strength), transparent), transparent 70%);
         background-repeat: no-repeat;
         background-attachment: fixed;
@@ -330,7 +330,7 @@
 
 /*
  * Isometric illustrations (src/components/iso): flat faces in the page's grays, thin edges, and one accent for what is
- * lit, the site's own green; what has gone wrong takes the destructive red.
+ * lit, the site's own blue; what has gone wrong takes the destructive red.
  */
 :root {
     --iso-body: #ececf0;

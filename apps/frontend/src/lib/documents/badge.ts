@@ -1,4 +1,4 @@
-import { formatSizeText, type AnalysisResponse } from '@weighme/core';
+import { analysisFacts, formatSizeText, type AnalysisResponse } from '@weighme/core';
 import { canonicalUrl } from '@config/site';
 
 /** A badge as drawn, and how long it may be kept. */
@@ -7,7 +7,7 @@ export type Badge = { svg: string; cache: string };
 const LABEL = 'gzip size';
 const LABEL_COLOR = '#4b5563';
 /** Both carry white text at more than 4.5:1. */
-const MEASURED_COLOR = '#0b7a53';
+const MEASURED_COLOR = '#1257c2';
 const NO_SIZE_COLOR = '#6b7280';
 /** Close enough to Verdana at 11 px: `textLength` makes the text fit the box exactly, whatever font is there. */
 const CHARACTER_WIDTH = 6.6;
@@ -41,10 +41,10 @@ const draw = (value: string, color: string): string => {
  */
 export const packageBadge = (analysis: AnalysisResponse | undefined, unavailable = false): Badge => {
     if (unavailable) return { svg: draw('unavailable', NO_SIZE_COLOR), cache: 'public, max-age=60' };
-    if (analysis?.status === 'failed') return { svg: draw('failed', NO_SIZE_COLOR), cache: 'public, max-age=300' };
-    if (analysis?.status !== 'done') return { svg: draw('not measured', NO_SIZE_COLOR), cache: 'public, max-age=300' };
-    const sizes = analysis.result.sizes;
-    return { svg: sizes === null ? draw('no bundle', NO_SIZE_COLOR) : draw(formatSizeText(sizes.gzip), MEASURED_COLOR), cache: 'public, max-age=3600, s-maxage=3600' };
+    const facts = analysis === undefined ? undefined : analysisFacts(analysis);
+    if (facts?.state === 'failed') return { svg: draw('failed', NO_SIZE_COLOR), cache: 'public, max-age=300' };
+    if (facts === undefined || facts.state === 'measuring') return { svg: draw('not measured', NO_SIZE_COLOR), cache: 'public, max-age=300' };
+    return { svg: facts.state === 'measured' ? draw(formatSizeText(facts.sizes.gzip), MEASURED_COLOR) : draw('no bundle', NO_SIZE_COLOR), cache: 'public, max-age=3600, s-maxage=3600' };
 };
 
 /** What goes into a README: the badge, linking back to the package's page. Without a version, it follows the latest release. */

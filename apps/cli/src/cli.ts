@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
-import { ApiError, createApiClient, formatSizeText, parseSpec, type AnalysisResponse, type AnalysisResult } from '@weighme/core';
+import { ApiError, createApiClient, formatSizeText, isMadeForNode, parseSpec, type AnalysisResponse, type AnalysisResult } from '@weighme/core';
 
 /** Where the API is until the site is deployed (docs/TODO.md): the one `pnpm dev` starts. */
 export const DEFAULT_API_URL = 'http://127.0.0.1:4100';
@@ -78,7 +78,7 @@ const report = (result: AnalysisResult): string => {
     const { packages } = result.install;
     lines.push(row('Install', `${formatSizeText(result.install.bytes)}, ${packages} ${packages === 1 ? 'package' : 'packages'}`));
     if (result.peerDependencies.length > 0) lines.push(`  ${result.peerDependencies.length} peer ${result.peerDependencies.length === 1 ? 'dependency is' : 'dependencies are'} not counted.\n`);
-    if (result.environment.nodeBuiltins.length > 0 || result.environment.nativeAddons > 0) lines.push('  Made for Node.js: this is not what it costs in a browser.\n');
+    if (isMadeForNode(result.environment)) lines.push('  Made for Node.js: this is not what it costs in a browser.\n');
     return lines.join('');
 };
 

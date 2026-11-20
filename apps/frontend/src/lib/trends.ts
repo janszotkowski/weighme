@@ -1,4 +1,4 @@
-import { TREND_RANGES, parseSpec, type AnalysisResponse, type TrendRange, type VersionEntry } from '@weighme/core';
+import { TREND_RANGES, analysisFacts, parseSpec, type AnalysisResponse, type TrendRange, type VersionEntry } from '@weighme/core';
 import { ApiError } from '@lib/api';
 
 export const MAX_TREND_PACKAGES = 4;
@@ -166,7 +166,8 @@ export const assignColors = (packages: readonly string[], previous: ReadonlyMap<
 export const packageState = (data: AnalysisResponse | undefined, error: unknown): string | undefined => {
     if (error instanceof ApiError && error.code === 'NOT_FOUND') return 'Not on npm';
     if (error !== null && error !== undefined) return 'Could not be loaded';
-    if (data === undefined || data.status === 'queued' || data.status === 'running') return 'Measuring…';
-    if (data.status === 'failed') return 'Could not be measured';
-    return data.result.sizes === null ? 'Nothing to import' : undefined;
+    const facts = data === undefined ? undefined : analysisFacts(data);
+    if (facts === undefined || facts.state === 'measuring') return 'Measuring…';
+    if (facts.state === 'failed') return 'Could not be measured';
+    return facts.state === 'nothing-to-import' ? 'Nothing to import' : undefined;
 };

@@ -1,4 +1,4 @@
-import type { AnalysisResult } from '@weighme/core';
+import { isMadeForNode, type AnalysisResult } from '@weighme/core';
 import { Link } from '@tanstack/react-router';
 import { FigureBand } from '@components/FigureBand';
 import { Notice } from '@components/Notice';
@@ -61,7 +61,7 @@ export const SizeResult = (props: SizeResultProps) => {
     const gzip = formatSize(sizes.gzip);
     const note = environmentNote(environment);
     // A package made for Node.js is not downloaded by a browser, so a time for it would mislead.
-    const madeForNode = environment.nodeBuiltins.length > 0 || environment.nativeAddons > 0;
+    const madeForNode = isMadeForNode(environment);
 
     return (
         <div className={'flex flex-col gap-8'}>

@@ -1,4 +1,4 @@
-import { parseSpec, type AnalysisResponse } from '@weighme/core';
+import { analysisFacts, parseSpec, type AnalysisResponse } from '@weighme/core';
 import { canonicalUrl, siteConfig } from '@config/site';
 import { formatDownloadTimes, formatSizeText } from '@lib/format';
 
@@ -50,26 +50,26 @@ const line = (label: string, value: string): string => `- **${label}:** ${value}
 export const packageMarkdown = (analysis: AnalysisResponse): string => {
     const { name, version } = analysis.package;
     const url = canonicalUrl(`/package/${name}`);
-    if (analysis.status === 'failed') return `# ${name}@${version}\n\nThis package could not be measured: ${mdText(analysis.failure.message)}\n\n[Its page](${url})\n`;
-    if (analysis.status !== 'done') return `# ${name}@${version}\n\nThis package is being measured. Ask again in a moment.\n\n[Its page](${url})\n`;
-    const { result, exports } = analysis;
+    const facts = analysisFacts(analysis);
+    if (facts.state === 'failed') return `# ${name}@${version}\n\nThis package could not be measured: ${mdText(facts.failure.message)}\n\n[Its page](${url})\n`;
+    if (facts.state === 'measuring') return `# ${name}@${version}\n\nThis package is being measured. Ask again in a moment.\n\n[Its page](${url})\n`;
+    const { result, exports } = facts;
     const sections = [`# ${name}@${version}\n`];
     if (result.description !== null) sections.push(`${mdText(result.description)}\n`);
-    const facts: string[] = [];
-    const madeForNode = result.environment.nodeBuiltins.length > 0 || result.environment.nativeAddons > 0;
-    if (result.sizes === null) {
-        facts.push(`This package has nothing to import, so it adds nothing to a bundle.${result.commands.length > 0 ? ` It installs the commands: ${result.commands.map(mdText).join(', ')}.` : ''}`);
+    const lines: string[] = [];
+    if (facts.state === 'nothing-to-import') {
+        lines.push(`This package has nothing to import, so it adds nothing to a bundle.${result.commands.length > 0 ? ` It installs the commands: ${result.commands.map(mdText).join(', ')}.` : ''}`);
     } else {
-        facts.push(line('Minified and gzipped', formatSizeText(result.sizes.gzip)), line('Minified', formatSizeText(result.sizes.minified)), line('Brotli', formatSizeText(result.sizes.brotli)));
-        if (!madeForNode) facts.push(line('Download time', formatDownloadTimes(result.sizes.gzip)));
+        lines.push(line('Minified and gzipped', formatSizeText(facts.sizes.gzip)), line('Minified', formatSizeText(facts.sizes.minified)), line('Brotli', formatSizeText(facts.sizes.brotli)));
+        if (!facts.madeForNode) lines.push(line('Download time', formatDownloadTimes(facts.sizes.gzip)));
     }
-    facts.push(line('Install size', formatSizeText(result.install.bytes)), line('Packages installed', String(result.install.packages)));
-    if (result.peerDependencies.length > 0) facts.push(line('Peer dependencies, not counted', result.peerDependencies.map(mdText).join(', ')));
-    if (madeForNode) facts.push('- It is made for Node.js, so the size is not what it costs in a web page.');
-    facts.push(line('Measured with', `${result.bundler.name} ${result.bundler.version}`));
-    if (result.repositoryUrl !== null) facts.push(line('Source', `<${result.repositoryUrl}>`));
-    sections.push(`${facts.join('\n')}\n`);
-    if (result.sizes !== null && result.composition.total > 1) {
+    lines.push(line('Install size', formatSizeText(result.install.bytes)), line('Packages installed', String(result.install.packages)));
+    if (result.peerDependencies.length > 0) lines.push(line('Peer dependencies, not counted', result.peerDependencies.map(mdText).join(', ')));
+    if (facts.madeForNode) lines.push('- It is made for Node.js, so the size is not what it costs in a web page.');
+    lines.push(line('Measured with', `${result.bundler.name} ${result.bundler.version}`));
+    if (result.repositoryUrl !== null) lines.push(line('Source', `<${result.repositoryUrl}>`));
+    sections.push(`${lines.join('\n')}\n`);
+    if (facts.state === 'measured' && result.composition.total > 1) {
         const parts = result.composition.packages.map((part) => `- ${mdText(part.name)}: ${Math.round(part.share * 100)}%`);
         sections.push(`## What the bundle is made of\n\n${parts.join('\n')}\n`);
     }

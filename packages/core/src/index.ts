@@ -8,4 +8,5 @@ export * from './contract/openapi.ts';
 export * from './contract/package-spec.ts';
 export * from './contract/search.ts';
 export * from './contract/trends.ts';
+export * from './facts.ts';
 export * from './format.ts';

@@ -1,12 +1,11 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
-import { ApiError, createApiClient, formatSizeText, isMadeForNode, parseSpec, type AnalysisResponse, type AnalysisResult } from '@weighme/core';
+import { ApiError, askAgain, createApiClient, formatSizeText, isMadeForNode, parseSpec, specToAsk, type AnalysisResponse, type AnalysisResult } from '@weighme/core';
 
 /** Where the API is until the site is deployed (docs/TODO.md): the one `pnpm dev` starts. */
 export const DEFAULT_API_URL = 'http://127.0.0.1:4100';
 
-/** How often to ask while a package is being measured, and for how long: the same pace as the package page. */
-const POLL_MS = 1000;
+/** How long to keep asking while a package is being measured. How often is core's to say (`askAgain`): the same pace as the package page. */
 const WAIT_MS = 120_000;
 
 const USAGE = `Usage: weighme <package> [--json] [--api <url>]
@@ -50,16 +49,16 @@ const parseCommandLine = (argv: string[], env: CliIo['env']): Options | 'help' |
     return { spec, json: parsed.values.json === true, api: api.replace(/\/+$/, '') };
 };
 
-/** Asks until the package has been measured, or until it is not worth waiting. Once the first answer names the exact version, only that is asked for: a tag would cost a question to the registry every time. */
+/** Asks until the package's sizes have arrived, or until it is not worth waiting: the part-by-part numbers are not printed, so they are not waited for. */
 const measure = async (options: Options, io: CliIo): Promise<AnalysisResponse> => {
     const deadline = Date.now() + (io.waitMs ?? WAIT_MS);
     const client = createApiClient({ baseUrl: options.api, fetch: io.fetch });
-    let spec = options.spec;
+    let answer: AnalysisResponse | undefined;
     for (;;) {
-        const answer = await client.analysis(spec);
-        if (answer.status === 'done' || answer.status === 'failed' || Date.now() >= deadline) return answer;
-        spec = `${answer.package.name}@${answer.package.version}`;
-        await sleep(io.pollMs ?? POLL_MS);
+        answer = await client.analysis(specToAsk(options.spec, answer));
+        const next = askAgain(answer);
+        if (next?.awaiting !== 'sizes' || Date.now() >= deadline) return answer;
+        await sleep(io.pollMs ?? next.afterMs);
     }
 };
 

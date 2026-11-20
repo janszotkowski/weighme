@@ -1,7 +1,9 @@
 import {
     ApiError,
+    askAgain,
     createApiClient,
-    isComplete,
+    measuringCount,
+    specToAsk,
     type AnalysisResponse,
     type ApiClient,
     type DownloadsResponse,
@@ -14,9 +16,6 @@ import {
 import { keepPreviousData, queryOptions, type QueryState } from '@tanstack/react-query';
 import { apiBaseUrl, internalApiHeaders } from '@config/api';
 
-/** While a package is queued or running its sizes can arrive any second; the part-by-part numbers take longer, and the page already shows the sizes. */
-const POLL_MS = 1000;
-const EXPORTS_POLL_MS = 2000;
 const HISTORY_POLL_MS = 2000;
 /** Once a poll has failed the next ones come slower, and after this many in a row they stop: the API is not coming back on its own. */
 const FAILED_POLL_MS = 5000;
@@ -59,23 +58,15 @@ export const pollInterval = (query: { state: PollState }, normal: number | false
 // A finished answer may be kept for a day, by the browser or a CDN.
 export const fetchAnalysis = (spec: string, signal?: AbortSignal): Promise<AnalysisResponse> => createApi().analysis(spec, { signal });
 
-/**
- * One package's analysis, asked for again while it is waiting or running. Once the first answer has named the exact
- * version, only that version is asked for: `latest` would have the backend ask the registry on every poll.
- */
+/** One package's analysis, asked for again while anything of it is still to come: what to ask for and how soon is core's to say (`specToAsk`, `askAgain`). */
 export const analysisQuery = (spec: string) => {
     const queryKey = ['analysis', spec] as const;
     return queryOptions({
         queryKey,
-        queryFn: ({ client, signal }) => {
-            const known = client.getQueryData<AnalysisResponse>(queryKey);
-            return fetchAnalysis(known === undefined ? spec : `${known.package.name}@${known.package.version}`, signal);
-        },
+        queryFn: ({ client, signal }) => fetchAnalysis(specToAsk(spec, client.getQueryData<AnalysisResponse>(queryKey)), signal),
         refetchInterval: (query) => {
-            const data = query.state.data;
-            // Nothing more will come: it failed, or everything has arrived, the part-by-part numbers included.
-            if (data === undefined || data.status === 'failed' || isComplete(data)) return false;
-            return pollInterval(query, data.status === 'done' ? EXPORTS_POLL_MS : POLL_MS);
+            const next = query.state.data === undefined ? undefined : askAgain(query.state.data);
+            return next === undefined ? false : pollInterval(query, next.afterMs);
         },
     });
 };
@@ -107,7 +98,7 @@ export const historyQuery = (name: string) =>
     queryOptions({
         queryKey: ['history', name],
         queryFn: ({ signal }) => fetchHistory(name, signal),
-        refetchInterval: (query) => pollInterval(query, query.state.data?.versions.some((entry) => entry.status === 'queued' || entry.status === 'running') === true ? HISTORY_POLL_MS : false),
+        refetchInterval: (query) => pollInterval(query, query.state.data !== undefined && measuringCount(query.state.data) > 0 ? HISTORY_POLL_MS : false),
     });
 
 /** Queues every version not yet measured. Each of them will be downloaded, in the worker's own container. */

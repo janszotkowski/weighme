@@ -1,3 +1,4 @@
+import { measuringCount } from '@weighme/core';
 import { keepPreviousData, useQueries } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { LoaderCircle } from 'lucide-react';
@@ -99,8 +100,7 @@ const TrendsPage = () => {
     }, [metric, group, now, histories.data, rangeDownloads.data]);
 
     const series = useMemo(() => packages.map((name) => ({ name, color: colors.get(name) ?? SERIES_COLORS[0] })), [packages, colors]);
-    const measuring =
-        metric === 'size' ? histories.data.reduce((sum, history) => sum + (history?.versions.filter((entry) => entry.status === 'queued' || entry.status === 'running').length ?? 0), 0) : 0;
+    const measuring = metric === 'size' ? histories.data.reduce((sum, history) => sum + (history === undefined ? 0 : measuringCount(history)), 0) : 0;
     const metricWord = metric === 'size' ? 'Minified + gzip size of recent versions, by release date' : `Downloads per ${group}`;
 
     // Drawing thousands of points takes a moment too. It waits behind this render, so the mask shows first, and it is

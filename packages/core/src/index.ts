@@ -1,5 +1,6 @@
 export * from './client/agent.ts';
 export * from './client/api.ts';
+export * from './client/follow.ts';
 export * from './contract/analysis.ts';
 export * from './contract/errors.ts';
 export * from './contract/history.ts';

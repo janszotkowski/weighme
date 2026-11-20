@@ -17,3 +17,6 @@ export type VersionEntry = z.infer<typeof versionEntrySchema>;
 export const historyResponseSchema = z.object({ name: z.string(), versions: z.array(versionEntrySchema) });
 
 export type HistoryResponse = z.infer<typeof historyResponseSchema>;
+
+/** How many of a history's versions are queued or running: while there are any, it is worth asking for again. */
+export const measuringCount = (history: HistoryResponse): number => history.versions.filter((entry) => entry.status === 'queued' || entry.status === 'running').length;

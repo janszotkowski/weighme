@@ -32,20 +32,21 @@ It runs the dependency and workflow policy, lint, format check, typecheck, tests
 
 ## Project structure
 
-| Path                                  | What lives there                                                                                                               |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `packages/core`                       | The contract shared by every app: zod/mini schemas and types of analyses, versions and errors, package spec parsing. No I/O.   |
-| `apps/backend/src/modules/analyses`   | The SQLite store of measurements and the job queue, the npm and GitHub readers, the public `/v1` and worker `/internal` routes |
-| `apps/backend/src/platform`, `config` | HTTP shell (request id, CORS, rate limit, error contract), logging, environment validation                                     |
-| `apps/worker/src/modules/analysis`    | One analysis: install without scripts, bundle with rolldown, measure, report; the limits a package runs under                  |
-| `apps/worker/src/modules/backend`     | The worker's client of the API: claim a job, hand in a result or a failure                                                     |
-| `apps/frontend/src/routes`            | Pages (TanStack Router file routes)                                                                                            |
-| `apps/frontend/src/components`        | UI components; `ui/` holds the Base UI primitives, `iso/` the illustrations                                                    |
-| `apps/frontend/src/lib`               | Formatting, API queries, trends, the documents for crawlers and agents (`documents/`), security headers                        |
-| `apps/frontend/src/server.ts`         | The server entry: documents and share images first, then the pages, every response with its headers                            |
-| `apps/e2e`                            | Browser tests (Playwright) of the built apps, with an axe-core audit                                                           |
-| `deploy`                              | The scripts that set up and update a server                                                                                    |
-| `tools`                               | The policy check, the smoke test, the `.env` initializer and the project's oxlint plugin                                       |
+| Path                                  | What lives there                                                                                                                                                                                                            |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/core`                       | The contract shared by every app: zod/mini schemas and types, package spec parsing, the typed API client and how to follow an analysis, and the facts every way of showing one starts from                                  |
+| `apps/backend/src/modules/analyses`   | The use cases (`application/`), the SQLite store of measurements and the job queue and the npm and GitHub readers (`infrastructure/`), the public `/v1` routes, the MCP tools and the worker's `/internal` routes (`http/`) |
+| `apps/backend/src/platform`, `config` | HTTP shell (request id, CORS, error contract), whose share each request counts against (`http/caller-shares.ts`), logging, environment validation                                                                           |
+| `apps/worker/src/modules/analysis`    | One analysis: install without scripts, bundle with rolldown, measure, report; the limits a package runs under                                                                                                               |
+| `apps/worker/src/modules/backend`     | The worker's client of the API: claim a job, hand in a result or a failure                                                                                                                                                  |
+| `apps/worker/src/modules/jobs`        | The job loop: takes jobs, hands in what each analysis says, keeps the shared store under its limit                                                                                                                          |
+| `apps/frontend/src/routes`            | Pages (TanStack Router file routes)                                                                                                                                                                                         |
+| `apps/frontend/src/components`        | UI components; `ui/` holds the Base UI primitives, `iso/` the illustrations                                                                                                                                                 |
+| `apps/frontend/src/lib`               | Formatting, API queries, trends, the documents for crawlers and agents and the share images (`documents/`), security headers                                                                                                |
+| `apps/frontend/src/server.ts`         | The server entry: documents and share images first (`lib/documents/router.ts`), then the pages, every response with its headers                                                                                             |
+| `apps/e2e`                            | Browser tests (Playwright) of the built apps, with an axe-core audit                                                                                                                                                        |
+| `deploy`                              | The scripts that set up and update a server                                                                                                                                                                                 |
+| `tools`                               | The policy check, the smoke test, the `.env` initializer and the project's oxlint plugin                                                                                                                                    |
 
 ## Code style
 
@@ -92,7 +93,7 @@ Add a file route under [`apps/frontend/src/routes`](apps/frontend/src/routes) wi
 
 ### Add an API route
 
-Routes live in [`apps/backend/src/modules/analyses/http/routes.ts`](apps/backend/src/modules/analyses/http/routes.ts). Validate the input with the schemas of `packages/core`, throw `AppError` with a code from the error contract, set a `Cache-Control` and add a test in `apps/backend/tests/http.test.ts`. A route that makes the worker download something counts against the queue limit.
+Routes live in [`apps/backend/src/modules/analyses/http/routes.ts`](apps/backend/src/modules/analyses/http/routes.ts), and what they answer with in [`application/analyses.ts`](apps/backend/src/modules/analyses/application/analyses.ts), which the MCP tools answer with too. Validate the input with the schemas of `packages/core`, throw `AppError` with a code from the error contract, set a `Cache-Control`, and add a test of the use case in `apps/backend/tests/analyses.test.ts` and of the route in `apps/backend/tests/http.test.ts`. A route that makes the worker download something counts against the queue limit: one that always does is named in [`composition/app.ts`](apps/backend/src/composition/app.ts).
 
 ## Pull requests
 

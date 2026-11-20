@@ -13,7 +13,12 @@ export type Container = AnalysisDeps & {
 
 /** The whole API: the HTTP shell with the public routes under `/v1` and the worker's under `/internal`. */
 export const createApp = (container: Container): Hono<AppEnv> => {
-    const app = createBaseApp(container);
+    // The shell counts every request against its caller's share, and is told here which of the routes mounted below are special.
+    const app = createBaseApp(container, {
+        isFree: (path) => path === '/v1/health',
+        alwaysQueues: (method, path) => method === 'POST' && path === '/v1/history',
+        isForAgents: (path) => path.startsWith('/v1/mcp'),
+    });
     app.get('/v1/health', (c) => {
         c.header('cache-control', 'no-store');
         return c.json({ status: 'ok' as const, version: container.config.APP_VERSION });

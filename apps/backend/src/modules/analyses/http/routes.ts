@@ -19,7 +19,8 @@ import { bodyLimit } from 'hono/body-limit';
 import type { DownloadsReader, MetadataReader, PackageSearcher, ReleasedVersion, StarsReader, VersionLister, VersionResolver } from '@modules/analyses/infrastructure/registry.ts';
 import type { AnalysisStore, VersionSummary } from '@modules/analyses/infrastructure/store.ts';
 import { AppError } from '@platform/errors.ts';
-import { sameSecret, type AppEnv } from '@platform/http/app.ts';
+import type { AppEnv } from '@platform/http/app.ts';
+import { sameSecret } from '@platform/secrets.ts';
 
 /**
  * Everything public is the same for every caller, so a CDN in front may keep it (`s-maxage`) and serve it a while longer

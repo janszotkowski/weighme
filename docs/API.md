@@ -64,7 +64,7 @@ Every address may make **300 requests a minute** to `/v1/*` (`/v1/health` does n
 | `RateLimit-Reset`     | Seconds until the window starts again    |
 | `Retry-After`         | On `429` and `503` only: seconds to wait |
 
-Past the limit the API answers `429 RATE_LIMITED`. Wait for `Retry-After` seconds, then continue. Adding packages to the queue has a much smaller limit of its own: `GET /v1/analyses` counts against it only when the package was not known and is now queued, and answers `429` past it too. A self-hosted API sets these numbers itself, see the [README](../README.md).
+Past the limit the API answers `429 RATE_LIMITED`. Wait for `Retry-After` seconds, then continue. Adding packages to the queue has a much smaller limit of its own: `GET /v1/analyses` counts against it only when the package was not known and is now queued, and answers `429` past it too. A self-hosted API sets these numbers itself, see [Configuration](CONFIGURATION.md).
 
 Answers carry `Cache-Control` and an `ETag`, so please cache on your side and honor them:
 

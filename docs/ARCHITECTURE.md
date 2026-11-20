@@ -17,7 +17,7 @@ apps/frontend    Web app: search, the package page, trends and how it works
 apps/cli         Command line: asks the API what a package costs and prints it
 packages/core    Shared contract: zod schemas, package name validation, the analyzer version, reading the API's answers
 docker           The configuration of the worker's network gateway
-docs             This page, the API reference, the MCP guide and the changelog, all of which the site also shows
+docs             This page, the API reference, the MCP guide and the changelog, all of which the site also shows, and the rest of the documentation
 ```
 
 ## One analysis

@@ -24,12 +24,14 @@ const analysisEnv = (): NodeJS.ProcessEnv => {
 /**
  * One analysis in a process of its own, in its own process group, so that a package that hangs the bundler, or a pnpm
  * below it, can be killed whole. `onMessage` hears the messages in order, one at a time, and always hears an end: when
- * the process dies, what it still owed is reported as failed. Its folder is removed whatever happened.
+ * the process dies, what it still owed is reported as failed. Its folder is removed whatever happened. `script` is the
+ * process to start: the analysis itself, unless a test stands in for it.
  */
 export const runAnalysis = async (
     ref: PackageRef,
     config: Pick<Config, 'WORKER_DIR' | 'JOB_TIMEOUT_MS' | 'JOB_MEMORY_MB' | 'MAX_INSTALL_BYTES' | 'PARTS_BUDGET_MS'>,
     onMessage: (message: AnalyzeMessage) => Promise<void>,
+    script: URL = new URL('./main.analyze.mjs', import.meta.url),
 ): Promise<void> => {
     const dir = join(config.WORKER_DIR, 'jobs', randomUUID());
     const request: AnalyzeRequest = {
@@ -47,7 +49,7 @@ export const runAnalysis = async (
 
     try {
         await new Promise<void>((resolve) => {
-            const child = fork(new URL('./main.analyze.mjs', import.meta.url), { env: analysisEnv(), detached: true, execArgv: [`--max-old-space-size=${config.JOB_MEMORY_MB}`] });
+            const child = fork(script, { env: analysisEnv(), detached: true, execArgv: [`--max-old-space-size=${config.JOB_MEMORY_MB}`] });
             let timedOut = false;
             const end = (reason: string): void => {
                 clearTimeout(timer);

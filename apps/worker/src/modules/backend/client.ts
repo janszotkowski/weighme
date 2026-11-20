@@ -10,10 +10,10 @@ const HAND_IN_RETRY_MS = 1000;
 
 const acceptedSchema = z.object({ accepted: z.boolean() });
 
-/** The worker's only way to the data: it holds no database of its own. */
-export const createBackendClient = (config: Pick<Config, 'BACKEND_URL' | 'WORKER_TOKEN'>) => {
+/** The worker's only way to the data: it holds no database of its own. `request` is `fetch`, unless a test stands in for the backend. */
+export const createBackendClient = (config: Pick<Config, 'BACKEND_URL' | 'WORKER_TOKEN'>, request: typeof fetch = fetch) => {
     const post = async (path: string, body?: unknown): Promise<unknown> => {
-        const response = await fetch(new URL(path, config.BACKEND_URL), {
+        const response = await request(new URL(path, config.BACKEND_URL), {
             method: 'POST',
             headers: { authorization: `Bearer ${config.WORKER_TOKEN}`, 'content-type': 'application/json' },
             signal: AbortSignal.timeout(TIMEOUT_MS),

@@ -1,5 +1,5 @@
 import * as z from 'zod/mini';
-import { analysisResponseSchema, packagesResponseSchema } from './analysis.ts';
+import { MAX_LISTED_PACKAGES, analysisResponseSchema, packagesResponseSchema } from './analysis.ts';
 import { errorResponseSchema } from './errors.ts';
 import { historyResponseSchema } from './history.ts';
 import { packageMetadataSchema } from './metadata.ts';
@@ -153,7 +153,9 @@ export const openApiDocument = ({ rateLimitPerMinute = 300, docsUrl = 'https://g
                 errors('400', '429', '503'),
             ),
         },
-        '/packages': { get: operation('listPackages', 'Every package with a finished measurement', [], json('PackagesResponse', 'Up to 50,000'), errors('429')) },
+        '/packages': {
+            get: operation('listPackages', 'Every package with a finished measurement', [], json('PackagesResponse', `Up to ${MAX_LISTED_PACKAGES.toLocaleString('en-US')}`), errors('429')),
+        },
         '/health': { get: operation('health', 'Whether the API is up, and which build', [], json('HealthResponse', 'Up'), {}) },
     },
     components: {

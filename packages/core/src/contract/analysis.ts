@@ -104,6 +104,9 @@ export type AnalysisResponse = z.infer<typeof analysisResponseSchema>;
  */
 export const isComplete = (answer: AnalysisResponse): boolean => answer.status === 'done' && answer.exports.status !== 'pending';
 
+/** The most packages `GET /v1/packages` lists: what one sitemap file may hold. */
+export const MAX_LISTED_PACKAGES = 50_000;
+
 /** The answer of `GET /v1/packages`: every package with a finished measurement, which is what is worth listing to a crawler. */
 export const packagesResponseSchema = z.object({ packages: z.array(z.object({ name: z.string(), measuredAt: z.string() })) });
 

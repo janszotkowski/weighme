@@ -1,4 +1,4 @@
-import { ApiError, TREND_RANGES, analysisForAgent, parseSpec, type TrendRange } from '@weighme/core';
+import { ApiError, MAX_SEARCH_LENGTH, MIN_SEARCH_LENGTH, TREND_RANGES, analysisForAgent, readPackageName, readPackageSpec, type TrendRange } from '@weighme/core';
 import { canonicalUrl } from '@config/site';
 import type { fetchAnalysis, fetchDownloads, fetchHistory, fetchMetadata, fetchSuggestions } from '@lib/api';
 import { MAX_TREND_PACKAGES, TREND_GROUPS, TREND_METRICS, groupDownloads, parsePackages, todayIso, validateTrendsSearch, type TrendGroup, type TrendsSearch } from '@lib/trends';
@@ -37,18 +37,18 @@ export type WebMcpDeps = {
 const PACKAGE_SPEC = { type: 'string', description: 'An npm package name, optionally with a version or tag: react, react@19.1.0, react@next.' } as const;
 const PACKAGE_NAME = { type: 'string', description: 'An npm package name, without a version: react.' } as const;
 
-/** The spec a tool was given, or the reason it is none: an agent gets the problem back instead of a page about nothing. */
-const specOf = (input: Record<string, unknown>) => {
+/** The spec a tool was given, as typed, or the reason it is none: an agent gets the problem back instead of a page about nothing. */
+const specOf = (input: Record<string, unknown>): string => {
     const text = String(input['package'] ?? '').trim();
-    const spec = parseSpec(text);
-    if (spec === undefined) throw new ApiError('VALIDATION_FAILED', 'package must be a name with an optional exact version or dist-tag, such as react or react@19.1.0');
-    return { text, ...spec };
+    const read = readPackageSpec(text);
+    if (!read.ok) throw new ApiError('VALIDATION_FAILED', read.reason);
+    return text;
 };
 
 const nameOf = (input: Record<string, unknown>): string => {
-    const spec = specOf(input);
-    if (spec.version !== undefined) throw new ApiError('VALIDATION_FAILED', 'package must be a name without a version');
-    return spec.name;
+    const read = readPackageName(String(input['package'] ?? ''));
+    if (!read.ok) throw new ApiError('VALIDATION_FAILED', read.reason);
+    return read.value;
 };
 
 const oneOf = <T extends string>(allowed: readonly T[], value: unknown, fallback: T): T => allowed.find((candidate) => candidate === value) ?? fallback;
@@ -64,7 +64,7 @@ export const webMcpTools = (deps: WebMcpDeps): WebMcpTool[] => [
         title: 'Search npm packages',
         description:
             'Finds npm packages by a text, with their description and weekly downloads. Nothing is measured or downloaded. Does not change the page; use open_package to show one to the user.',
-        inputSchema: { type: 'object', properties: { query: { type: 'string', minLength: 2, maxLength: 100, description: 'What to look for.' } }, required: ['query'] },
+        inputSchema: { type: 'object', properties: { query: { type: 'string', minLength: MIN_SEARCH_LENGTH, maxLength: MAX_SEARCH_LENGTH, description: 'What to look for.' } }, required: ['query'] },
         annotations: { readOnlyHint: true, untrustedContentHint: true },
         execute: async (input, signal) => ({ packages: await deps.api.search(String(input['query'] ?? '').trim(), signal) }),
     },
@@ -76,7 +76,7 @@ export const webMcpTools = (deps: WebMcpDeps): WebMcpTool[] => [
         inputSchema: { type: 'object', properties: { package: PACKAGE_SPEC }, required: ['package'] },
         annotations: { untrustedContentHint: true },
         execute: async (input, signal) => {
-            const answer = await deps.api.analysis(specOf(input).text, signal);
+            const answer = await deps.api.analysis(specOf(input), signal);
             return { ...analysisForAgent(answer), url: canonicalUrl(`/package/${answer.package.name}`) };
         },
     },
@@ -128,7 +128,7 @@ export const webMcpTools = (deps: WebMcpDeps): WebMcpTool[] => [
         inputSchema: { type: 'object', properties: { package: PACKAGE_SPEC }, required: ['package'] },
         annotations: {},
         execute: async (input) => {
-            const { text } = specOf(input);
+            const text = specOf(input);
             await deps.showPackage(text);
             return { opened: text, url: canonicalUrl(`/package/${text}`) };
         },

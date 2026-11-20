@@ -22,3 +22,26 @@ export const parseSpec = (input: string): PackageSpec | undefined => {
     if (version !== undefined && !isExactVersion(version) && !DIST_TAG.test(version)) return undefined;
     return { name, version };
 };
+
+/** What was read of a `package` parameter, or the reason it is none, in words fit for whoever sent it. */
+export type PackageRead<T> = { ok: true; value: T } | { ok: false; reason: string };
+
+/** A name with or without a version or a dist-tag: what a package's cost is asked with. */
+export const readPackageSpec = (input: string): PackageRead<PackageSpec> => {
+    const spec = parseSpec(input);
+    return spec === undefined ? { ok: false, reason: 'package must be a name with an optional exact version or dist-tag, such as react or react@19.1.0' } : { ok: true, value: spec };
+};
+
+/** A name alone: what is asked about a package whatever its version, such as its history. */
+export const readPackageName = (input: string): PackageRead<string> => {
+    const spec = parseSpec(input);
+    return spec === undefined || spec.version !== undefined ? { ok: false, reason: 'package must be a name without a version' } : { ok: true, value: spec.name };
+};
+
+/** A name with an exact version: what is asked about one release, where a tag would have to be looked up first. */
+export const readPackageRef = (input: string): PackageRead<{ name: string; version: string }> => {
+    const spec = parseSpec(input);
+    return spec === undefined || spec.version === undefined || !isExactVersion(spec.version)
+        ? { ok: false, reason: 'package must be a name with an exact version, such as react@19.1.0' }
+        : { ok: true, value: { name: spec.name, version: spec.version } };
+};

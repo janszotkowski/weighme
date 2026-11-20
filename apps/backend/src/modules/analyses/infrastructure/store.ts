@@ -1,4 +1,5 @@
 import { ANALYZER_VERSION, analysisResponseSchema, type AnalysisFailure, type AnalysisResponse, type AnalysisResult, type ExportDetails, type Job, type PackageRef } from '@weighme/core';
+import type { MeasuredPackage, VersionSummary } from '@modules/analyses/application/ports.ts';
 import { AppError } from '@platform/errors.ts';
 import type { Database } from './database.ts';
 
@@ -16,12 +17,6 @@ type Row = {
     exports_until: number | null;
     priority: number;
 };
-
-/** One line of `GET /v1/packages`. */
-export type MeasuredPackage = { name: string; measuredAt: string };
-
-/** What a history shows of one version. The sizes are null until it is measured, and for a package with nothing to import. */
-export type VersionSummary = { status: string; gzip: number | null; minified: number | null };
 
 const MEASURED_TTL_MS = 5 * 60_000;
 

@@ -1,4 +1,5 @@
 import {
+    MAX_LISTED_PACKAGES,
     MAX_SEARCH_LENGTH,
     MIN_SEARCH_LENGTH,
     analysisFailureSchema,
@@ -6,18 +7,17 @@ import {
     exportDetailsSchema,
     TREND_RANGES,
     isComplete,
-    isExactVersion,
     openApiDocument,
-    parseSpec,
-    type AnalysisResponse,
-    type HistoryResponse,
-    type PackageSpec,
-    type VersionEntry,
+    readPackageName,
+    readPackageRef,
+    readPackageSpec,
+    type PackageRead,
 } from '@weighme/core';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import type { DownloadsReader, MetadataReader, PackageSearcher, ReleasedVersion, StarsReader, VersionLister, VersionResolver } from '@modules/analyses/infrastructure/registry.ts';
-import type { AnalysisStore, VersionSummary } from '@modules/analyses/infrastructure/store.ts';
+import type { AnalysisAnswer, Analyses } from '@modules/analyses/application/analyses.ts';
+import type { DownloadsReader, PackageSearcher } from '@modules/analyses/application/ports.ts';
+import type { AnalysisStore } from '@modules/analyses/infrastructure/store.ts';
 import { AppError } from '@platform/errors.ts';
 import type { AppEnv } from '@platform/http/app.ts';
 import { sameSecret } from '@platform/secrets.ts';
@@ -32,46 +32,21 @@ const DETAIL_CACHE = 'public, max-age=300, s-maxage=3600, stale-while-revalidate
 const EXACT_CACHE = 'public, max-age=300, s-maxage=86400, stale-while-revalidate=86400';
 
 const REPOSITORY = /^[\w.-]{1,100}\/[\w.-]{1,100}$/;
-/** What one sitemap file may hold. */
-const MAX_LISTED_PACKAGES = 50_000;
 
-/** What the public routes read from: npm and GitHub in production; tests pass their own, so they never reach the network. */
+/** What the public routes answer with: the use cases, and the two readers whose answers are passed on as they are. */
 export type AnalysisDeps = {
-    store: AnalysisStore;
-    resolve: VersionResolver;
+    analyses: Analyses;
     search: PackageSearcher;
-    listVersions: VersionLister;
     readDownloads: DownloadsReader;
-    readStars: StarsReader;
-    readMetadata: MetadataReader;
 };
 
-const STATUSES: readonly VersionEntry['status'][] = ['queued', 'running', 'done', 'failed'];
+/** What a tag points to changes with the next release; the result of an exact version does not. What is still being measured is asked for again. */
+const cacheOf = (answer: AnalysisAnswer): string => (isComplete(answer.analysis) ? (answer.exact ? EXACT_CACHE : SHORT_CACHE) : 'no-store');
 
-const versionEntry = (released: ReleasedVersion, known: VersionSummary | undefined): VersionEntry => {
-    const { version, publishedAt } = released;
-    const status = STATUSES.find((candidate) => candidate === known?.status);
-    if (known === undefined || status === undefined) return { version, publishedAt, status: 'unmeasured', gzip: null, minified: null };
-    return { version, publishedAt, status, gzip: status === 'done' ? known.gzip : null, minified: status === 'done' ? known.minified : null };
-};
-
-/**
- * A package's analysis, queued when there is none. An exact version already in the store needs no question to the
- * registry: polling costs it nothing. A failed one is asked about again, so that a version taken off npm meanwhile is not queued once more.
- * `queueShare` is the caller's share of queueing (`AppEnv`): counted only when this adds the package to the queue.
- */
-export const lookUpAnalysis = async (deps: Pick<AnalysisDeps, 'store' | 'resolve'>, spec: PackageSpec, queueShare: () => void): Promise<AnalysisResponse> => {
-    const exact = spec.version !== undefined && isExactVersion(spec.version) ? spec.version : undefined;
-    const known = exact === undefined ? undefined : deps.store.find({ name: spec.name, version: exact });
-    if (known !== undefined && known.status !== 'failed') return known;
-    return deps.store.findOrEnqueue({ name: spec.name, version: await deps.resolve(spec.name, spec.version ?? 'latest') }, queueShare);
-};
-
-/** A name without a version, from the `package` parameter. */
-const packageName = (value: string | undefined): string => {
-    const spec = parseSpec(value ?? '');
-    if (spec === undefined || spec.version !== undefined) throw new AppError('VALIDATION_FAILED', 'package must be a name without a version');
-    return spec.name;
+/** What was read of the `package` parameter (`readPackageSpec` and its kin), or the reason it is none as the caller's mistake. */
+const packageOf = <T>(read: PackageRead<T>): T => {
+    if (!read.ok) throw new AppError('VALIDATION_FAILED', read.reason);
+    return read.value;
 };
 
 /** The body as JSON. A body that is not JSON is the caller's mistake, not the server's. */
@@ -85,7 +60,7 @@ const readJson = async (c: Context<AppEnv>): Promise<unknown> => {
 
 /** The public API: what a package costs. */
 export const analysisRoutes = (deps: AnalysisDeps, options: { rateLimitPerMinute: number }): Hono<AppEnv> => {
-    const { store, resolve, search, listVersions, readDownloads, readStars, readMetadata } = deps;
+    const { analyses, search, readDownloads } = deps;
     const routes = new Hono<AppEnv>();
 
     // The contract for generated clients; it changes only with a deployment.
@@ -95,53 +70,33 @@ export const analysisRoutes = (deps: AnalysisDeps, options: { rateLimitPerMinute
         return c.json(openApi);
     });
 
-    const history = async (name: string): Promise<HistoryResponse> => {
-        const released = await listVersions(name);
-        const known = store.summaries(name);
-        return { name, versions: released.map((version) => versionEntry(version, known.get(version.version))) };
-    };
-
     routes.get('/history', async (c) => {
         c.header('cache-control', 'no-store');
-        return c.json(await history(packageName(c.req.query('package'))));
+        return c.json(await analyses.history(packageOf(readPackageName(c.req.query('package') ?? ''))));
     });
 
     // Measuring downloads every version, so it is only ever asked for, never done because a page was opened.
     routes.post('/history', async (c) => {
-        const name = packageName(c.req.query('package'));
-        store.enqueueLater((await listVersions(name)).map(({ version }) => ({ name, version })));
+        const history = await analyses.measureHistory(packageOf(readPackageName(c.req.query('package') ?? '')));
         c.header('cache-control', 'no-store');
-        return c.json(await history(name));
+        return c.json(history);
     });
 
     routes.get('/analyses', async (c) => {
-        const spec = parseSpec(c.req.query('package') ?? '');
-        if (spec === undefined) throw new AppError('VALIDATION_FAILED', 'package must be a name with an optional exact version or dist-tag, such as react or react@19.1.0');
-        const exact = spec.version !== undefined && isExactVersion(spec.version) ? spec.version : undefined;
-
+        const spec = packageOf(readPackageSpec(c.req.query('package') ?? ''));
         // Documents for crawlers ask with `known=1`: they read what has been measured, and never cause a download.
-        if (c.req.query('known') === '1') {
-            const version = exact ?? (await resolve(spec.name, spec.version ?? 'latest'));
-            const found = store.find({ name: spec.name, version });
-            if (found === undefined) throw new AppError('NOT_FOUND', `${spec.name}@${version} has not been measured`);
-            c.header('cache-control', isComplete(found) ? (exact === undefined ? SHORT_CACHE : EXACT_CACHE) : 'no-store');
-            return c.json(found);
-        }
-
-        const answer = await lookUpAnalysis(deps, spec, c.get('queueShare'));
-
-        // What a tag points to changes with the next release; the result of an exact version does not.
-        c.header('cache-control', isComplete(answer) ? (exact === undefined ? SHORT_CACHE : EXACT_CACHE) : 'no-store');
-        return c.json(answer);
+        const answer = c.req.query('known') === '1' ? await analyses.known(spec) : await analyses.lookUp(spec, c.get('queueShare'));
+        c.header('cache-control', cacheOf(answer));
+        return c.json(answer.analysis);
     });
 
     routes.get('/packages', (c) => {
         c.header('cache-control', DETAIL_CACHE);
-        return c.json({ packages: store.measuredPackages(MAX_LISTED_PACKAGES) });
+        return c.json({ packages: analyses.measuredPackages(MAX_LISTED_PACKAGES) });
     });
 
     routes.get('/downloads', async (c) => {
-        const name = packageName(c.req.query('package'));
+        const name = packageOf(readPackageName(c.req.query('package') ?? ''));
         const range = TREND_RANGES.find((candidate) => candidate === c.req.query('range'));
         if (range === undefined) throw new AppError('VALIDATION_FAILED', `range must be one of ${TREND_RANGES.join(', ')}`);
         c.header('cache-control', DETAIL_CACHE);
@@ -152,18 +107,13 @@ export const analysisRoutes = (deps: AnalysisDeps, options: { rateLimitPerMinute
         const repository = c.req.query('repository') ?? '';
         if (!REPOSITORY.test(repository) || repository.split('/').some((part) => part.startsWith('.'))) throw new AppError('VALIDATION_FAILED', 'repository must be owner/name');
         c.header('cache-control', DETAIL_CACHE);
-        // GitHub is asked only about the repository of a package measured here: any other name would spend the few
-        // questions it allows on whatever a caller made up.
-        return c.json({ stars: store.knowsRepository(repository) ? await readStars(repository) : null });
+        return c.json({ stars: await analyses.stars(repository) });
     });
 
-    // Only what the registry says about the version: nothing is queued or downloaded for this.
     routes.get('/metadata', async (c) => {
-        const spec = parseSpec(c.req.query('package') ?? '');
-        const version = spec?.version;
-        if (spec === undefined || version === undefined || !isExactVersion(version)) throw new AppError('VALIDATION_FAILED', 'package must be a name with an exact version, such as react@19.1.0');
+        const ref = packageOf(readPackageRef(c.req.query('package') ?? ''));
         c.header('cache-control', DETAIL_CACHE);
-        return c.json(await readMetadata(spec.name, version));
+        return c.json(await analyses.metadata(ref));
     });
 
     routes.get('/search', async (c) => {

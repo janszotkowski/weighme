@@ -1,14 +1,14 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { AGENT_LIST_LIMIT, analysisForAgent, isExactVersion, parseSpec, type PackageSpec } from '@weighme/core';
+import { AGENT_LIST_LIMIT, analysisForAgent, readPackageSpec, type PackageSpec } from '@weighme/core';
 import { McpServer, createMcpHandler, type CallToolResult, type ToolAnnotations } from '@modelcontextprotocol/server';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { lookUpAnalysis, type AnalysisDeps } from '@modules/analyses/http/routes.ts';
+import type { Analyses } from '@modules/analyses/application/analyses.ts';
 import { AppError, errorBody } from '@platform/errors.ts';
 import { allowedOrigin, type AppEnv } from '@platform/http/app.ts';
 import type { Logger } from '@platform/logger.ts';
 
-export type McpDeps = Pick<AnalysisDeps, 'store' | 'resolve' | 'readMetadata'> & { logger: Logger; corsOrigins: readonly string[]; version: string };
+export type McpDeps = { analyses: Analyses; logger: Logger; corsOrigins: readonly string[]; version: string };
 
 /** A tool call is a small JSON message; the API's limit on public bodies holds it too. */
 const MAX_BODY_BYTES = 16 * 1024;
@@ -24,9 +24,9 @@ const READ_ONLY: ToolAnnotations = { readOnlyHint: true, destructiveHint: false,
 const packageSpec = z.string().trim().min(1).describe('An npm package name, optionally with a version or tag: react, react@19.1.0, react@next.');
 
 const specOf = (value: string): PackageSpec => {
-    const spec = parseSpec(value);
-    if (spec === undefined) throw new AppError('VALIDATION_FAILED', 'package must be a name with an optional exact version or dist-tag, such as react or react@19.1.0');
-    return spec;
+    const read = readPackageSpec(value);
+    if (!read.ok) throw new AppError('VALIDATION_FAILED', read.reason);
+    return read.value;
 };
 
 /** The share of queueing of the caller whose request is being answered (`AppEnv`): the tools run inside the handler, past the route. */
@@ -56,7 +56,7 @@ export const createPackageMcpServer = (deps: McpDeps): McpServer => {
             inputSchema: z.object({ package: packageSpec }),
             annotations: MEASURES,
         },
-        (input) => answer(async () => analysisForAgent(await lookUpAnalysis(deps, specOf(input.package), queueShares.getStore() ?? noShare))),
+        (input) => answer(async () => analysisForAgent((await deps.analyses.lookUp(specOf(input.package), queueShares.getStore() ?? noShare)).analysis)),
     );
 
     server.registerTool(
@@ -68,12 +68,7 @@ export const createPackageMcpServer = (deps: McpDeps): McpServer => {
             inputSchema: z.object({ package: packageSpec }),
             annotations: READ_ONLY,
         },
-        (input) =>
-            answer(async () => {
-                const spec = specOf(input.package);
-                const exact = spec.version !== undefined && isExactVersion(spec.version) ? spec.version : await deps.resolve(spec.name, spec.version ?? 'latest');
-                return deps.readMetadata(spec.name, exact);
-            }),
+        (input) => answer(() => deps.analyses.metadata(specOf(input.package))),
     );
 
     return server;

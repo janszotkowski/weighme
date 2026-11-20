@@ -1,5 +1,6 @@
-import { TREND_RANGE_DAYS, isExactVersion, isValidPackageName, type DownloadsResponse, type PackageMetadata, type PackageSuggestion, type TrendRange } from '@weighme/core';
+import { TREND_RANGE_DAYS, isExactVersion, isValidPackageName, type DownloadsResponse, type PackageMetadata, type PackageSuggestion } from '@weighme/core';
 import { rangeChunks } from '@modules/analyses/application/download-ranges.ts';
+import type { DownloadsReader, MetadataReader, PackageSearcher, ReleasedVersion, StarsReader, VersionLister, VersionResolver } from '@modules/analyses/application/ports.ts';
 import { selectVersions } from '@modules/analyses/application/versions.ts';
 import { AppError } from '@platform/errors.ts';
 
@@ -11,20 +12,6 @@ const HOUR_MS = 3_600_000;
 
 const SEARCH_SIZE = 8;
 const MAX_DESCRIPTION = 160;
-
-export type VersionResolver = (name: string, versionOrTag: string) => Promise<string>;
-
-export type PackageSearcher = (query: string) => Promise<PackageSuggestion[]>;
-
-export type ReleasedVersion = { version: string; publishedAt: string | null };
-
-export type VersionLister = (name: string) => Promise<ReleasedVersion[]>;
-
-export type DownloadsReader = (name: string, range: TrendRange) => Promise<DownloadsResponse['days']>;
-
-export type StarsReader = (repository: string) => Promise<number | null>;
-
-export type MetadataReader = (name: string, version: string) => Promise<PackageMetadata>;
 
 const record = (value: unknown): Record<string, unknown> => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {});
 
